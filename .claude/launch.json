@@ -1,0 +1,8 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "api", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@feather/api", "dev"], "port": 4000 },
+    { "name": "owner", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@feather/owner", "dev"], "port": 5173 },
+    { "name": "ops", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@feather/ops", "dev"], "port": 5174 }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "feather",
+  "private": true,
+  "description": "Feather — rake-to-site logistics watchdog for cement and bulk construction materials. © Webrizen AI Labs Pvt Ltd.",
+  "author": "Webrizen AI Labs Pvt Ltd",
+  "license": "UNLICENSED",
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:api": "turbo run dev --filter=@feather/api",
+    "dev:owner": "turbo run dev --filter=@feather/owner --filter=@feather/api",
+    "dev:ops": "turbo run dev --filter=@feather/ops --filter=@feather/api",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "seed": "pnpm --filter @feather/api seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0"
+  }
+}
