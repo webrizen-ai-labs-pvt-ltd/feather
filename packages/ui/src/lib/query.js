@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useToast } from '../components/overlays.jsx';
+import { useToast } from '../app/overlays.jsx';
 import { useApi } from './auth.jsx';
 
 /** GET with react-query. The cache key is path + query. */

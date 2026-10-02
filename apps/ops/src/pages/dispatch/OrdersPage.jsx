@@ -1,7 +1,28 @@
-import { PlusIcon } from '@heroicons/react/24/outline';
+import { CheckDone01, ClipboardCheck, Plus } from '@untitledui/icons';
 import { useState } from 'react';
 import { CREDIT_REASON_LABELS, formatDate, formatINR, formatLakh, formatNumber } from '@feather/shared';
-import { Badge, Button, Card, ComboField, EmptyState, Loading, Meter, Modal, NumberField, SelectField, TextField, toOptions, useAction, useForm, useGet } from '@feather/ui';
+import {
+  Alert,
+  Avatar,
+  Button,
+  Card,
+  ComboField,
+  EmptyState,
+  Loading,
+  Meter,
+  Modal,
+  NumberField,
+  PageHeader,
+  SelectField,
+  StatusBadge,
+  TextField,
+  toOptions,
+  useAction,
+  useForm,
+  useGet,
+} from '@feather/ui';
+
+const initials = (n = '') => n.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 
 export default function OrdersPage() {
   const { data, isLoading } = useGet('/sales/orders', { status: 'open' });
@@ -11,44 +32,65 @@ export default function OrdersPage() {
   const close = useAction((api, id) => api.post(`/sales/orders/${id}/status`, { status: 'completed' }), { success: 'Order closed', invalidate: ['/sales'] });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between gap-3">
-        <h1 className="text-xl font-bold">Open orders</h1>
-        <Button icon={PlusIcon} onClick={() => setCreating(true)}>New order</Button>
-      </div>
+    <>
+      <PageHeader
+        help="orders"
+        title="Orders"
+        subtitle="Open customer orders and how much is sent. Customers on hold cannot get trucks."
+        actions={
+          <Button iconLeading={Plus} onPress={() => setCreating(true)}>
+            New order
+          </Button>
+        }
+      />
       {isLoading ? (
         <Loading />
       ) : !data?.items.length ? (
-        <Card>
-          <EmptyState title="No open orders" />
-        </Card>
+        <EmptyState icon={ClipboardCheck} title="No open orders" action={<Button iconLeading={Plus} onPress={() => setCreating(true)}>New order</Button>} />
       ) : (
-        <ul className="space-y-3">
+        <ul className="grid gap-4 lg:grid-cols-2">
           {data.items.map((o) => {
             const c = creditOf(o.customer?._id);
             const left = o.qty - o.dispatchedQty;
+            const pct = o.qty ? Math.round((o.dispatchedQty / o.qty) * 100) : 0;
             return (
               <li key={o._id}>
-                <Card className="p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-bold">{o.customer?.name}</p>
-                      <p className="text-sm text-ink-600">
-                        {o.orderNo} · {o.material?.name} → {o.deliverySite?.name}
-                      </p>
-                      <p className="text-xs text-ink-500">
-                        {formatDate(o.createdAt)} · {formatINR(o.ratePerUnit)} / {o.material?.unit}
-                      </p>
+                <Card className="flex h-full flex-col p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <Avatar size="md" initials={initials(o.customer?.name)} />
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-primary">{o.customer?.name}</p>
+                        <p className="truncate text-sm text-tertiary">
+                          {o.orderNo} · {formatDate(o.createdAt)}
+                        </p>
+                      </div>
                     </div>
-                    {c?.credit.blocked ? <Badge tone={c.override ? 'warn' : 'bad'}>{c.override ? 'Override' : 'Blocked'}</Badge> : <Badge tone="good">Credit OK</Badge>}
+                    {c?.credit.blocked ? <StatusBadge tone={c.override ? 'warn' : 'bad'}>{c.override ? 'Allowed anyway' : 'On hold'}</StatusBadge> : <StatusBadge tone="good">Credit OK</StatusBadge>}
                   </div>
-                  <Meter className="mt-3" value={o.dispatchedQty} max={o.qty} />
-                  <p className="mt-1 text-sm text-ink-600">
-                    Sent {formatNumber(o.dispatchedQty, 2)} of {formatNumber(o.qty, 2)} · delivered {formatNumber(o.deliveredQty, 2)} · <b>{formatNumber(left, 2)} left</b>
+                  <p className="mt-4 text-sm text-secondary">
+                    <span className="font-medium">{o.material?.name}</span> → {o.deliverySite?.name}
                   </p>
-                  {c?.credit.blocked && <p className="mt-1 text-sm text-red-700">{c.credit.reasons.map((r) => CREDIT_REASON_LABELS[r]).join(' · ')}</p>}
+                  <p className="text-xs text-tertiary">
+                    {formatINR(o.ratePerUnit)} / {o.material?.unit}
+                  </p>
+                  <div className="mt-4">
+                    <div className="mb-2 flex justify-between text-sm">
+                      <span className="text-tertiary">
+                        Sent {formatNumber(o.dispatchedQty, 2)} of {formatNumber(o.qty, 2)} · delivered {formatNumber(o.deliveredQty, 2)}
+                      </span>
+                      <span className="font-semibold text-primary">{pct}%</span>
+                    </div>
+                    <Meter value={o.dispatchedQty} max={o.qty} />
+                    <p className="mt-2 text-sm font-semibold text-primary">{formatNumber(Math.max(0, left), 2)} left to send</p>
+                  </div>
+                  {c?.credit.blocked && <p className="mt-2 text-sm text-error-primary">{c.credit.reasons.map((r) => CREDIT_REASON_LABELS[r]).join(' · ')}</p>}
                   {left <= 0 && (
-                    <Button size="sm" variant="secondary" className="mt-2" onClick={() => close.mutate(o._id)}>Close order</Button>
+                    <div className="mt-4">
+                      <Button size="sm" color="secondary" iconLeading={CheckDone01} onPress={() => close.mutate(o._id)}>
+                        Close order
+                      </Button>
+                    </div>
                   )}
                 </Card>
               </li>
@@ -57,7 +99,7 @@ export default function OrdersPage() {
         </ul>
       )}
       {creating && <OrderForm onClose={() => setCreating(false)} />}
-    </div>
+    </>
   );
 }
 
@@ -79,12 +121,17 @@ function OrderForm({ onClose }) {
 
   if (credit) {
     return (
-      <Modal open onClose={onClose} title="Order saved — but customer is blocked" footer={<Button onClick={onClose}>OK</Button>}>
-        <p className="text-sm text-ink-700">No truck can be sent on this order until payment is received or the owner allows an override.</p>
-        <p className="mt-2 text-sm font-semibold text-red-700">{credit.reasons.map((r) => CREDIT_REASON_LABELS[r]).join(' · ')}</p>
-        <p className="mt-1 text-sm">
-          Exposure {formatLakh(credit.exposure)} of {formatLakh(credit.creditLimit)} · overdue {formatLakh(credit.overdueAmount)}
-        </p>
+      <Modal
+        open
+        onClose={onClose}
+        icon={ClipboardCheck}
+        tone="warning"
+        title="Order saved — but the customer is on hold"
+        footer={<Button onPress={onClose}>OK</Button>}
+      >
+        <Alert tone="warning" title={credit.reasons.map((r) => CREDIT_REASON_LABELS[r]).join(' · ')}>
+          No truck can be sent on this order until they pay or the owner allows it anyway. They owe {formatLakh(credit.exposure)} of {formatLakh(credit.creditLimit)} · overdue {formatLakh(credit.overdueAmount)}.
+        </Alert>
       </Modal>
     );
   }
@@ -93,21 +140,35 @@ function OrderForm({ onClose }) {
     <Modal
       open
       onClose={onClose}
+      icon={ClipboardCheck}
+      tone="brand"
       title="New customer order"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button loading={save.isPending} onClick={() => save.mutate(v)}>Save order</Button>
+          <Button color="secondary" onPress={onClose}>
+            Cancel
+          </Button>
+          <Button isLoading={save.isPending} onPress={() => save.mutate(v)}>
+            Save order
+          </Button>
         </>
       }
     >
-      <div className="space-y-4">
+      <div className="flex flex-col gap-5">
         <ComboField label="Customer" value={v.customer} onChange={(val) => (f.set('customer')(val), f.set('deliverySite')(''))} options={toOptions(customers?.items)} error={f.errors.customer} required />
-        <SelectField label="Delivery site" value={v.deliverySite} onChange={f.set('deliverySite')} options={toOptions(customerSites)} error={f.errors.deliverySite} placeholder={v.customer && !customerSites.length ? 'No site — ask owner to add one' : 'Choose…'} required />
-        <SelectField label="Material" value={v.material} onChange={f.set('material')} options={toOptions(materials?.items, (m) => m.unit)} error={f.errors.material} required />
-        <div className="grid grid-cols-2 gap-3">
+        <SelectField
+          label="Delivery site"
+          value={v.deliverySite}
+          onChange={f.set('deliverySite')}
+          options={toOptions(customerSites)}
+          error={f.errors.deliverySite}
+          placeholder={v.customer && !customerSites.length ? 'No site — ask the owner to add one' : 'Choose…'}
+          required
+        />
+        <SelectField label="Product" value={v.material} onChange={f.set('material')} options={toOptions(materials?.items, (m) => m.unit)} error={f.errors.material} required />
+        <div className="grid grid-cols-2 gap-4">
           <NumberField label="Quantity" suffix={unit} value={v.qty} onChange={f.set('qty')} error={f.errors.qty} required />
-          <NumberField label="Rate" suffix={`₹/${unit}`} value={v.ratePerUnit} onChange={f.set('ratePerUnit')} error={f.errors.ratePerUnit} required />
+          <NumberField label="Rate" prefix="₹" suffix={`/${unit}`} value={v.ratePerUnit} onChange={f.set('ratePerUnit')} error={f.errors.ratePerUnit} required />
         </div>
         <TextField label="Notes" value={v.notes} onChange={f.set('notes')} />
       </div>

@@ -2,18 +2,29 @@
   "name": "@feather/ui",
   "version": "0.1.0",
   "private": true,
-  "description": "Shared React components, Tailwind theme, API client and auth for the Feather frontends.",
+  "description": "Feather design system: Untitled UI React components (src/uui), Feather app components, theme, API client, auth and hooks.",
   "type": "module",
   "exports": {
     ".": "./src/index.js",
-    "./theme.css": "./src/theme.css"
+    "./styles.css": "./src/styles.css"
   },
   "dependencies": {
     "@feather/assets": "workspace:*",
     "@feather/shared": "workspace:*",
-    "@headlessui/react": "^2.2.4",
-    "@heroicons/react": "^2.2.0",
-    "clsx": "^2.1.1"
+    "@fontsource-variable/inter": "^5.2.5",
+    "@internationalized/date": "^3.12.4",
+    "@react-aria/utils": "^3.34.1",
+    "@react-stately/utils": "^3.12.1",
+    "@tailwindcss/typography": "^0.5.20",
+    "@untitledui/file-icons": "^0.0.9",
+    "@untitledui/icons": "^0.0.23",
+    "react-aria": "^3.52.1",
+    "react-aria-components": "^1.21.1",
+    "react-stately": "^3.50.0",
+    "recharts": "^3.10.1",
+    "tailwind-merge": "^3.7.0",
+    "tailwindcss-animate": "^1.0.7",
+    "tailwindcss-react-aria-components": "^2.2.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",

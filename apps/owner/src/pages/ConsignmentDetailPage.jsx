@@ -1,6 +1,6 @@
-import { ArrowLeftIcon, PencilSquareIcon } from '@heroicons/react/24/outline';
+import { CheckDone01, Edit03, FileCheck02, Package, Play, Truck01 } from '@untitledui/icons';
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { CONSIGNMENT_MODE_LABELS, formatDateTime, formatINR, formatNumber, formatPct, formatQty, formatVehicleNo } from '@feather/shared';
 import {
   Button,
@@ -14,12 +14,22 @@ import {
   FlagList,
   FreightBadge,
   Loading,
+  MetricCard,
   PageHeader,
-  Stat,
-  TripStatusBadge,
+  shipmentTracking,
+  TrackingProgress,
+  TrackingTimeline,
+  truckTracking,
+  MiniTracker,
 } from '@feather/ui';
 import { useAction, useGet } from '@/lib/hooks.js';
 import { ConsignmentForm } from '@/pages/ConsignmentsPage.jsx';
+
+const ACTIONS = {
+  place: { title: 'Start the free-hours timer?', message: 'The time now (from the server) is saved as the arrival time.', confirm: 'Start timer' },
+  release: { title: 'Mark as emptied?', message: 'Do this when the shipment is fully unloaded and handed back. The final late fee is fixed.', confirm: 'Mark emptied' },
+  close: { title: 'Close this shipment?', message: 'A closed shipment cannot take more trucks.', confirm: 'Close shipment', needReason: true },
+};
 
 export default function ConsignmentDetailPage() {
   const { id } = useParams();
@@ -36,82 +46,128 @@ export default function ConsignmentDetailPage() {
   const c = data.item;
   const r = c.reconciliation;
   const unit = c.unit;
+  const track = shipmentTracking(c);
+  const lossPct = r?.receivedLoadedQty ? (r.transitLossQty / r.receivedLoadedQty) * 100 : null;
 
   return (
     <>
       <PageHeader
-        back={
-          <Link to="/consignments" className="mb-2 inline-flex items-center gap-1 text-sm font-medium text-ink-500 hover:text-ink-800">
-            <ArrowLeftIcon className="size-4" /> Rakes & ships
-          </Link>
-        }
-        title={`${c.referenceType} ${c.referenceNo}`}
-        subtitle={`${CONSIGNMENT_MODE_LABELS[c.mode]} · ${c.material?.name} · ${c.supplier}`}
+        help="owner-rakes"
+        breadcrumbs={[{ label: 'Shipments', href: '/shipments' }]}
+        title={c.referenceNo}
+        subtitle={`${CONSIGNMENT_MODE_LABELS[c.mode]} · ${c.material?.name} · from ${c.supplier}`}
         actions={
           <>
             <ConsignmentStatusBadge status={c.status} />
-            <Button variant="secondary" icon={PencilSquareIcon} onClick={() => setEditing(true)}>Edit</Button>
-            {c.status === 'expected' && <Button onClick={() => setConfirm({ action: 'place' })}>Mark placed (start clock)</Button>}
-            {c.status === 'placed' && <Button onClick={() => setConfirm({ action: 'release' })}>Mark released</Button>}
-            {c.status === 'released' && <Button variant="secondary" onClick={() => setConfirm({ action: 'close', needReason: true })}>Close</Button>}
+            <Button color="secondary" iconLeading={Edit03} onPress={() => setEditing(true)}>
+              Edit
+            </Button>
+            {c.status === 'expected' && (
+              <Button iconLeading={Play} onPress={() => setConfirm('place')}>
+                Mark arrived
+              </Button>
+            )}
+            {c.status === 'placed' && (
+              <Button iconLeading={Package} onPress={() => setConfirm('release')}>
+                Mark emptied
+              </Button>
+            )}
+            {c.status === 'released' && (
+              <Button color="secondary" iconLeading={CheckDone01} onPress={() => setConfirm('close')}>
+                Close
+              </Button>
+            )}
           </>
         }
       />
 
+      <TrackingProgress className="mb-6" steps={track.steps} current={track.current} tone={track.tone} headline={track.headline} subline={`${formatQty(c.liftedQty, unit)} of ${formatQty(c.declaredQty, unit)} unloaded`} />
+
       {c.placedAt && <DemurrageClock consignment={c} showMoney className="mb-6" />}
 
       {r && (
-        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Stat label={`On ${c.referenceType}`} value={formatQty(r.declaredQty, unit)} sub={`Lifted ${formatQty(r.liftedQty, unit)}`} />
-          <Stat label="Left at siding" value={formatQty(r.balanceAtSiding, unit)} tone={r.balanceAtSiding > 0 && c.releasedAt ? 'bad' : 'neutral'} sub={c.releasedAt ? 'Not lifted — check with siding' : 'Still to lift'} />
-          <Stat label="On the road" value={formatQty(r.onRoadQty, unit)} />
-          <Stat
-            label="Lost between siding and yard"
+        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-6">
+          <MetricCard icon={FileCheck02} label="On the paper" value={formatQty(r.declaredQty, unit)} sub={`Unloaded ${formatQty(r.liftedQty, unit)}`} />
+          <MetricCard
+            icon={Package}
+            label="Left on the train"
+            value={formatQty(r.balanceAtSiding, unit)}
+            tone={r.balanceAtSiding > 0 && c.releasedAt ? 'bad' : 'neutral'}
+            sub={c.releasedAt ? 'Not unloaded — check with loading staff' : 'Still to unload'}
+          />
+          <MetricCard icon={Truck01} label="On trucks now" value={formatQty(r.onRoadQty, unit)} sub={`${data.trips.filter((t) => t.status === 'in_transit').length} trucks on the way`} />
+          <MetricCard
+            label="Lost on the way"
             value={formatQty(r.transitLossQty, unit)}
             tone={r.lockedTrips ? 'bad' : 'good'}
-            sub={`${r.receivedLoadedQty ? formatPct((r.transitLossQty / r.receivedLoadedQty) * 100) : '—'} · ${r.lockedTrips} trucks locked`}
+            sub={`${lossPct === null ? '—' : formatPct(lossPct)} · ${r.lockedTrips} payments on hold`}
           />
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="p-5">
-          <DetailList
-            className="sm:grid-cols-1"
-            items={[
-              ['Siding / port', c.location?.name],
-              ['Wagons', c.wagonCount || '—'],
-              ['Free time', `${c.freeTimeHours} hours`],
-              ['Demurrage rate', formatINR(c.demurrageRatePerWagonHour)],
-              ['Purchase rate', c.purchaseRatePerUnit ? `${formatINR(c.purchaseRatePerUnit)} / ${unit}` : '—'],
-              ['Freight rate', c.freightRatePerUnit ? `${formatINR(c.freightRatePerUnit)} / ${unit}` : 'Transporter rate'],
-              ['Placed at', formatDateTime(c.placedAt)],
-              ['Released at', formatDateTime(c.releasedAt)],
-              c.demurrage?.finalPenalty != null && ['Final demurrage', formatINR(c.demurrage.finalPenalty)],
-              c.notes && ['Notes', c.notes],
-            ]}
-          />
-        </Card>
-        <Card className="lg:col-span-2">
-          <CardHeader title={`Trucks (${data.trips.length})`} />
+      <div className="grid gap-6 xl:grid-cols-3">
+        <div className="flex flex-col gap-6 xl:col-span-2">
           <DataTable
+            title="Trucks from this shipment"
+            badge={<span className="text-sm text-tertiary">{data.trips.length}</span>}
             dense
             rows={data.trips}
             onRowClick={(t) => navigate(`/trips/${t._id}`)}
             empty="No trucks loaded yet."
+            emptyIcon={Truck01}
             columns={[
-              { key: 'no', header: 'Trip', render: (t) => <span className="font-medium">{t.tripNo}</span> },
-              { key: 'vehicle', header: 'Vehicle', render: (t) => formatVehicleNo(t.vehicleNo) },
-              { key: 'to', header: 'To', render: (t) => t.destination?.name },
-              { key: 'loaded', header: 'Loaded', align: 'right', render: (t) => formatNumber(t.loading?.qty, 3) },
+              {
+                key: 'vehicle',
+                header: 'Truck',
+                render: (t) => (
+                  <div>
+                    <p className="font-medium text-primary">{formatVehicleNo(t.vehicleNo)}</p>
+                    <p className="text-xs text-tertiary">
+                      {t.tripNo} · to {t.destination?.name}
+                    </p>
+                  </div>
+                ),
+              },
+              {
+                key: 'track',
+                header: 'Tracking',
+                render: (t) => {
+                  const k = truckTracking(t);
+                  return <MiniTracker steps={k.steps} current={k.current} tone={k.tone} />;
+                },
+              },
+              { key: 'loaded', header: 'Sent', align: 'right', render: (t) => formatNumber(t.loading?.qty, 3) },
               { key: 'recv', header: 'Received', align: 'right', render: (t) => (t.receipt?.qty != null ? formatNumber(t.receipt.qty, 3) : '—') },
-              { key: 'loss', header: 'Loss', align: 'right', render: (t) => (t.variance?.lossPct != null ? formatPct(t.variance.lossPct) : '—') },
-              { key: 'status', header: 'Status', render: (t) => <TripStatusBadge status={t.status} /> },
-              { key: 'freight', header: 'Freight', render: (t) => <FreightBadge status={t.freight?.status} /> },
-              { key: 'flags', header: 'Issues', render: (t) => <FlagList flags={t.flags} compact /> },
+              { key: 'loss', header: 'Lost', align: 'right', render: (t) => (t.variance?.lossPct != null ? formatPct(t.variance.lossPct) : '—') },
+              { key: 'freight', header: 'Payment', render: (t) => <FreightBadge status={t.freight?.status} /> },
+              { key: 'flags', header: 'Problems', render: (t) => <FlagList flags={t.flags} compact /> },
             ]}
           />
-        </Card>
+        </div>
+
+        <div className="flex flex-col gap-6">
+          <Card>
+            <CardHeader title="Details" />
+            <div className="p-5 md:p-6">
+              <DetailList
+                columns={1}
+                items={[
+                  ['Unloading point', c.location?.name],
+                  ['Wagons', c.wagonCount || '—'],
+                  ['Free hours', `${c.freeTimeHours} hours`],
+                  ['Late fee rate', formatINR(c.demurrageRatePerWagonHour)],
+                  ['Purchase rate', c.purchaseRatePerUnit ? `${formatINR(c.purchaseRatePerUnit)} / ${unit}` : '—'],
+                  ['Truck rate', c.freightRatePerUnit ? `${formatINR(c.freightRatePerUnit)} / ${unit}` : "Truck company's rate"],
+                  ['Arrived at', formatDateTime(c.placedAt)],
+                  ['Emptied at', formatDateTime(c.releasedAt)],
+                  c.demurrage?.finalPenalty != null && ['Final late fee', formatINR(c.demurrage.finalPenalty)],
+                  c.notes && ['Notes', c.notes],
+                ]}
+              />
+            </div>
+          </Card>
+          <TrackingTimeline events={track.events} />
+        </div>
       </div>
 
       {confirm && (
@@ -119,16 +175,11 @@ export default function ConsignmentDetailPage() {
           open
           onClose={() => setConfirm(null)}
           loading={act.isPending}
-          needReason={confirm.needReason}
-          title={{ place: 'Start the free-time clock?', release: 'Mark as released?', close: 'Close this consignment?' }[confirm.action]}
-          message={
-            {
-              place: 'The server time now will be saved as the placement time.',
-              release: 'Do this when the rake is empty and handed back. The final demurrage will be fixed.',
-              close: 'Closed consignments cannot take more trucks.',
-            }[confirm.action]
-          }
-          onConfirm={(reason) => act.mutate({ action: confirm.action, reason })}
+          needReason={ACTIONS[confirm].needReason}
+          title={ACTIONS[confirm].title}
+          message={ACTIONS[confirm].message}
+          confirmLabel={ACTIONS[confirm].confirm}
+          onConfirm={(reason) => act.mutate({ action: confirm, reason })}
         />
       )}
       {editing && <ConsignmentForm existing={c} onClose={() => setEditing(false)} />}

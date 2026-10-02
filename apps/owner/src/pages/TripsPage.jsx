@@ -1,98 +1,136 @@
-import { ArrowDownTrayIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import { Download01, SearchLg, Truck01 } from '@untitledui/icons';
 import { useState } from 'react';
+import { Form } from 'react-aria-components';
 import { useNavigate, useSearchParams } from 'react-router';
-import { FREIGHT_STATUS_LABELS, formatDateTime, formatINR, formatNumber, formatPct, formatVehicleNo, TRIP_STATUS_LABELS } from '@feather/shared';
-import { Button, Card, DataTable, FlagList, FreightBadge, Loading, PageHeader, SelectField, TextField, TripStatusBadge, useApi } from '@feather/ui';
+import { formatDateTime, formatINR, formatNumber, formatPct, formatVehicleNo } from '@feather/shared';
+import { Button, DataTable, FlagList, FreightBadge, Loading, MiniTracker, PageHeader, Pager, Segmented, TextField, truckTracking, useApi } from '@feather/ui';
 import { useGet } from '@/lib/hooks.js';
 
-const opts = (labels) => [{ value: '', label: 'All' }, ...Object.entries(labels).map(([value, label]) => ({ value, label }))];
+/** Quick views, like order tabs in a shop: each maps to API filters. */
+const VIEWS = [
+  { value: 'all', label: 'All', query: {} },
+  { value: 'road', label: 'On the way', query: { status: 'in_transit' } },
+  { value: 'hold', label: 'Payment on hold', query: { freight: 'locked' } },
+  { value: 'ready', label: 'Ready to pay', query: { freight: 'ready' } },
+  { value: 'problems', label: 'With problems', query: { flagged: 'true' } },
+  { value: 'paid', label: 'Paid', query: { freight: 'paid' } },
+];
+
+function viewFromParams(params) {
+  if (params.get('status') === 'in_transit') return 'road';
+  const fr = params.get('freight');
+  if (fr === 'locked') return 'hold';
+  if (fr === 'ready') return 'ready';
+  if (fr === 'paid') return 'paid';
+  if (params.get('flagged') === 'true') return 'problems';
+  return 'all';
+}
 
 export default function TripsPage() {
   const [params, setParams] = useSearchParams();
-  const [search, setSearch] = useState(params.get('search') ?? '');
+  const view = viewFromParams(params);
+  const search = params.get('search') ?? '';
+  const [draft, setDraft] = useState(search);
   const [page, setPage] = useState(1);
-  const filters = {
-    status: params.get('status') ?? '',
-    freight: params.get('freight') ?? '',
-    flagged: params.get('flagged') ?? '',
-    search: params.get('search') ?? '',
-  };
-  const setFilter = (key) => (value) => {
-    const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    setParams(next, { replace: true });
-    setPage(1);
-  };
-  const { data, isLoading } = useGet('/trips', { ...filters, page, limit: 50 });
+  const query = { ...VIEWS.find((v) => v.value === view).query, search: search || undefined, page, limit: 25 };
+  const { data, isLoading } = useGet('/trips', query);
   const navigate = useNavigate();
   const api = useApi();
   const pages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
 
+  const setView = (v) => {
+    const next = new URLSearchParams(VIEWS.find((x) => x.value === v).query);
+    if (search) next.set('search', search);
+    setParams(next, { replace: true });
+    setPage(1);
+  };
+  const runSearch = (e) => {
+    e.preventDefault();
+    const next = new URLSearchParams(params);
+    if (draft.trim()) next.set('search', draft.trim());
+    else next.delete('search');
+    setParams(next, { replace: true });
+    setPage(1);
+  };
+
   return (
     <>
       <PageHeader
-        title="Trips & freight"
-        subtitle="Every truck, both weighments side by side, and its freight lock."
+        help="owner-trips"
+        title="Truck trips"
+        subtitle="Track every truck from loading to payment, like a parcel."
         actions={
-          <Button variant="secondary" icon={ArrowDownTrayIcon} onClick={() => api.download('/exports/trips.xlsx')}>
+          <Button color="secondary" iconLeading={Download01} onPress={() => api.download('/exports/trips.xlsx')}>
             Excel
           </Button>
         }
       />
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            setFilter('search')(search.trim());
-          }}
-        >
-          <TextField label="Search" placeholder="Truck no, trip no, challan" value={search} onChange={(e) => setSearch(e.target.value)} suffix={<MagnifyingGlassIcon className="size-5" />} />
-        </form>
-        <SelectField label="Trip status" value={filters.status} onChange={setFilter('status')} options={opts(TRIP_STATUS_LABELS)} />
-        <SelectField label="Freight" value={filters.freight} onChange={setFilter('freight')} options={opts(FREIGHT_STATUS_LABELS)} />
-        <SelectField
-          label="Issues"
-          value={filters.flagged}
-          onChange={setFilter('flagged')}
-          options={[
-            { value: '', label: 'All trips' },
-            { value: 'true', label: 'Only trips with issues' },
+
+      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <Segmented options={VIEWS} value={view} onChange={setView} />
+        <Form onSubmit={runSearch} className="w-full lg:w-80">
+          <TextField icon={SearchLg} placeholder="Truck no., trip no., delivery note" aria-label="Search trips" value={draft} onChange={setDraft} />
+        </Form>
+      </div>
+
+      {isLoading ? (
+        <Loading />
+      ) : (
+        <DataTable
+          title={VIEWS.find((v) => v.value === view).label === 'All' ? 'All truck trips' : VIEWS.find((v) => v.value === view).label}
+          badge={<span className="text-sm text-tertiary">{data?.total ?? 0}</span>}
+          rows={data?.items}
+          onRowClick={(t) => navigate(`/trips/${t._id}`)}
+          empty={search ? `No trip matches “${search}”.` : 'No trips here.'}
+          emptyIcon={Truck01}
+          footer={<Pager page={page} pages={pages} onChange={setPage} />}
+          columns={[
+            {
+              key: 'truck',
+              header: 'Truck',
+              render: (t) => (
+                <div className="flex items-center gap-3">
+                  <span className="flex size-10 items-center justify-center rounded-full bg-secondary text-fg-quaternary">
+                    <Truck01 className="size-5" aria-hidden />
+                  </span>
+                  <div>
+                    <p className="font-medium text-primary">{formatVehicleNo(t.vehicleNo)}</p>
+                    <p className="text-xs text-tertiary">
+                      {t.tripNo} · {t.transporter?.name}
+                    </p>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: 'route',
+              header: 'From → To',
+              render: (t) => (
+                <div>
+                  <p className="text-secondary">
+                    {t.sourceLocation?.name} → {t.destination?.name}
+                  </p>
+                  <p className="text-xs text-tertiary">
+                    {t.material?.name} · {formatDateTime(t.loading?.at)}
+                  </p>
+                </div>
+              ),
+            },
+            {
+              key: 'track',
+              header: 'Tracking',
+              render: (t) => {
+                const k = truckTracking(t);
+                return <MiniTracker steps={k.steps} current={k.current} tone={k.tone} />;
+              },
+            },
+            { key: 'net', header: 'Sent / received', align: 'right', render: (t) => `${formatNumber(t.loading?.net, 3)} / ${t.receipt?.net != null ? formatNumber(t.receipt.net, 3) : '—'}` },
+            { key: 'loss', header: 'Lost', align: 'right', render: (t) => (t.variance?.lossPct != null ? formatPct(t.variance.lossPct) : '—') },
+            { key: 'freight', header: 'Payment', render: (t) => <FreightBadge status={t.freight?.status} /> },
+            { key: 'balance', header: 'Balance', align: 'right', render: (t) => formatINR(t.freight?.balance) },
+            { key: 'flags', header: 'Problems', render: (t) => <FlagList flags={t.flags} compact /> },
           ]}
         />
-      </div>
-      <Card>
-        {isLoading ? (
-          <Loading />
-        ) : (
-          <DataTable
-            dense
-            rows={data?.items}
-            onRowClick={(t) => navigate(`/trips/${t._id}`)}
-            empty="No trips match."
-            columns={[
-              { key: 'no', header: 'Trip', render: (t) => <span className="font-medium">{t.tripNo}</span> },
-              { key: 'vehicle', header: 'Vehicle', render: (t) => formatVehicleNo(t.vehicleNo) },
-              { key: 'transporter', header: 'Transporter', render: (t) => t.transporter?.name },
-              { key: 'material', header: 'Material', render: (t) => t.material?.name },
-              { key: 'route', header: 'From → To', render: (t) => `${t.sourceLocation?.name ?? ''} → ${t.destination?.name ?? ''}` },
-              { key: 'loaded', header: 'Loaded', render: (t) => formatDateTime(t.loading?.at) },
-              { key: 'net', header: 'Load / Recv net', align: 'right', render: (t) => `${formatNumber(t.loading?.net, 3)} / ${t.receipt?.net != null ? formatNumber(t.receipt.net, 3) : '—'}` },
-              { key: 'loss', header: 'Loss', align: 'right', render: (t) => (t.variance?.lossPct != null ? formatPct(t.variance.lossPct) : '—') },
-              { key: 'status', header: 'Status', render: (t) => <TripStatusBadge status={t.status} /> },
-              { key: 'freight', header: 'Freight', render: (t) => <FreightBadge status={t.freight?.status} /> },
-              { key: 'balance', header: 'Balance', align: 'right', render: (t) => formatINR(t.freight?.balance) },
-              { key: 'flags', header: 'Issues', render: (t) => <FlagList flags={t.flags} compact /> },
-            ]}
-          />
-        )}
-      </Card>
-      {pages > 1 && (
-        <div className="mt-4 flex items-center justify-end gap-2 text-sm">
-          <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
-          <span className="text-ink-600">Page {page} of {pages}</span>
-          <Button size="sm" variant="secondary" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</Button>
-        </div>
       )}
     </>
   );

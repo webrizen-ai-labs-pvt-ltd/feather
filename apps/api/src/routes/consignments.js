@@ -65,7 +65,7 @@ router.get('/:id', async (req, res) => {
     .populate('material')
     .populate('location', 'name type')
     .lean();
-  if (!c) throw notFound('Rake / ship');
+  if (!c) throw notFound('Shipment');
   const trips = await Trip.find({ consignment: c._id })
     .sort({ 'loading.at': -1 })
     .populate('transporter', 'name')
@@ -96,7 +96,7 @@ router.post('/', requireRole(OWNER, DISPATCH_OPERATOR), validate(consignmentSche
   const [material, location] = await Promise.all([Material.findById(data.material), Location.findById(data.location)]);
   if (!material) throw badRequest('Choose the material.');
   if (!location || ![LOCATION_TYPES.SIDING, LOCATION_TYPES.PORT].includes(location.type)) {
-    throw badRequest('Choose a railway siding or port.');
+    throw badRequest('Choose a railway station or port.');
   }
   if (req.user.role !== OWNER) delete data.purchaseRatePerUnit;
   const c = await Consignment.create({
@@ -111,7 +111,7 @@ router.post('/', requireRole(OWNER, DISPATCH_OPERATOR), validate(consignmentSche
 
 router.patch('/:id', requireRole(OWNER), validate(consignmentSchema), async (req, res) => {
   const c = await Consignment.findById(req.params.id);
-  if (!c) throw notFound('Rake / ship');
+  if (!c) throw notFound('Shipment');
   if (String(c.material) !== req.valid.material && c.tripCount > 0) throw badRequest('Material cannot change after loading has started.');
   const before = c.toObject();
   c.set({ ...req.valid, referenceType: REFERENCE_TYPE_BY_MODE[req.valid.mode] });
@@ -122,10 +122,10 @@ router.patch('/:id', requireRole(OWNER), validate(consignmentSchema), async (req
 
 async function loadForAction(req) {
   const c = await Consignment.findById(req.params.id);
-  if (!c) throw notFound('Rake / ship');
+  if (!c) throw notFound('Shipment');
   const u = req.user;
   if (u.role === SIDING_SUPERVISOR && u.locations?.length && !u.locations.some((l) => String(l) === String(c.location))) {
-    throw forbidden('You are not assigned to this siding.');
+    throw forbidden('You are not assigned to this unloading point.');
   }
   return c;
 }
@@ -144,7 +144,7 @@ router.post('/:id/place', requireRole(OWNER, DISPATCH_OPERATOR, SIDING_SUPERVISO
 /** Rake empty and handed back to Railways / ship sailed. Final demurrage is fixed. */
 router.post('/:id/release', requireRole(OWNER, DISPATCH_OPERATOR, SIDING_SUPERVISOR), async (req, res) => {
   const c = await loadForAction(req);
-  if (c.status !== CONSIGNMENT_STATUS.PLACED) throw badRequest('Only an unloading rake can be released.');
+  if (c.status !== CONSIGNMENT_STATUS.PLACED) throw badRequest('Only an unloading shipment can be released.');
   c.releasedAt = new Date();
   c.status = CONSIGNMENT_STATUS.RELEASED;
   const clock = demurrage({
@@ -165,7 +165,7 @@ router.post('/:id/release', requireRole(OWNER, DISPATCH_OPERATOR, SIDING_SUPERVI
 
 router.post('/:id/close', requireRole(OWNER), validate(reasonSchema), async (req, res) => {
   const c = await Consignment.findById(req.params.id);
-  if (!c) throw notFound('Rake / ship');
+  if (!c) throw notFound('Shipment');
   const onRoad = await Trip.countDocuments({ consignment: c._id, status: TRIP_STATUS.IN_TRANSIT });
   if (onRoad) throw badRequest(`${onRoad} trucks are still on the road. Receive them first.`);
   c.status = CONSIGNMENT_STATUS.CLOSED;

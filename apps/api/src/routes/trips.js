@@ -143,7 +143,7 @@ router.post('/:id/assign', office, validate(assignOrderSchema), async (req, res)
   if (!trip) throw notFound('Trip');
   if (trip.status !== TRIP_STATUS.IN_TRANSIT) throw badRequest('Truck is not on the road.');
   if (trip.order) throw badRequest('This truck is already sent against an order.');
-  if (trip.source !== TRIP_SOURCE.CONSIGNMENT) throw badRequest('Only trucks lifted from a rake / ship can be re-assigned.');
+  if (trip.source !== TRIP_SOURCE.CONSIGNMENT) throw badRequest('Only trucks loaded from a shipment can be sent to a customer.');
   const order = await Order.findById(req.valid.order);
   if (!order || order.status !== 'open') throw badRequest('This order is not open.');
   if (String(order.material) !== String(trip.material)) throw badRequest('The order is for a different material.');
@@ -157,7 +157,7 @@ router.post('/:id/assign', office, validate(assignOrderSchema), async (req, res)
     } else {
       const override = await activeOverride(order.customer);
       if (!override || !(await consumeOverride(override._id, trip._id))) {
-        throw new HttpError(403, 'Dispatch blocked: credit limit crossed or payment overdue. Ask the owner.', { code: 'CREDIT_BLOCKED', data: check });
+        throw new HttpError(403, 'Customer on hold: credit limit crossed or payment overdue. Ask the owner.', { code: 'CREDIT_BLOCKED', data: check });
       }
       credit.override = override._id;
       credit.overrideReason = override.reason;
@@ -204,7 +204,7 @@ router.post('/:id/breakdown/clear', office, async (req, res) => {
 router.patch('/:id/advance', office, validate(advanceSchema), async (req, res) => {
   const trip = await Trip.findById(req.params.id);
   if (!trip) throw notFound('Trip');
-  if (trip.freight.status === FREIGHT_STATUS.PAID) throw badRequest('Freight is already paid.');
+  if (trip.freight.status === FREIGHT_STATUS.PAID) throw badRequest('Truck payment is already paid.');
   const before = trip.freight.advance;
   Object.assign(trip.freight, freightSettlement({ loadedQty: trip.loading.qty, rate: trip.freight.rate, advance: req.valid.advance, deduction: trip.freight.deduction }));
   await trip.save();
@@ -218,7 +218,7 @@ router.patch('/:id/advance', office, validate(advanceSchema), async (req, res) =
 router.post('/:id/freight/approve', ownerOnly, async (req, res) => {
   const trip = await Trip.findById(req.params.id);
   if (!trip) throw notFound('Trip');
-  if (trip.freight.status !== FREIGHT_STATUS.LOCKED) throw badRequest('Freight is not locked.');
+  if (trip.freight.status !== FREIGHT_STATUS.LOCKED) throw badRequest('Truck payment is not locked.');
   trip.freight.status = FREIGHT_STATUS.READY;
   trip.freight.reviewedBy = req.user._id;
   trip.freight.reviewedAt = new Date();
@@ -232,7 +232,7 @@ router.post('/:id/freight/approve', ownerOnly, async (req, res) => {
 router.post('/:id/freight/waive', ownerOnly, validate(reasonSchema), async (req, res) => {
   const trip = await Trip.findById(req.params.id);
   if (!trip) throw notFound('Trip');
-  if (![FREIGHT_STATUS.LOCKED, FREIGHT_STATUS.READY].includes(trip.freight.status)) throw badRequest('Freight cannot be changed now.');
+  if (![FREIGHT_STATUS.LOCKED, FREIGHT_STATUS.READY].includes(trip.freight.status)) throw badRequest('Truck payment cannot be changed now.');
   const before = { deduction: trip.freight.deduction, status: trip.freight.status };
   Object.assign(trip.freight, freightSettlement({ loadedQty: trip.loading.qty, rate: trip.freight.rate, advance: trip.freight.advance, deduction: 0 }));
   Object.assign(trip.freight, { status: FREIGHT_STATUS.READY, waived: true, reviewedBy: req.user._id, reviewedAt: new Date(), reviewNote: req.valid.reason });
@@ -244,7 +244,7 @@ router.post('/:id/freight/waive', ownerOnly, validate(reasonSchema), async (req,
 router.post('/:id/freight/paid', ownerOnly, async (req, res) => {
   const trip = await Trip.findById(req.params.id);
   if (!trip) throw notFound('Trip');
-  if (trip.freight.status !== FREIGHT_STATUS.READY) throw badRequest('Only cleared freight can be marked paid.');
+  if (trip.freight.status !== FREIGHT_STATUS.READY) throw badRequest('Only cleared truck payment can be marked paid.');
   trip.freight.status = FREIGHT_STATUS.PAID;
   trip.freight.paidAt = new Date();
   await trip.save();

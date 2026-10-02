@@ -1,5 +1,1 @@
-@import 'tailwindcss';
-@import '@feather/ui/theme.css';
-
-/* Scan the shared UI package for class names too. */
-@source '../../../packages/ui/src';
+@import '@feather/ui/styles.css';

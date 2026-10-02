@@ -37,16 +37,16 @@ async function checkDemurrage(settings) {
     const last = c.demurrage?.lastAlertStatus ?? 'ok';
     // Alert only when things get worse, so the owner is not spammed every 5 minutes.
     if (SEVERITY_ORDER.indexOf(clock.status) <= SEVERITY_ORDER.indexOf(last)) continue;
-    const ref = `${c.referenceType} ${c.referenceNo}`;
+    const ref = c.referenceNo;
     await raiseAlert({
       type: ALERT_TYPES.DEMURRAGE_RISK,
       severity: clock.status === 'overdue' ? ALERT_SEVERITY.CRITICAL : ALERT_SEVERITY.WARNING,
-      title: clock.status === 'overdue' ? `Free time OVER — ${ref}` : `Demurrage risk — ${ref}`,
+      title: clock.status === 'overdue' ? `Late fee started — ${ref}` : `Running late — ${ref}`,
       lines: [
         `${c.location?.name}: ${formatQty(clock.remainingQty, c.unit)} still to lift.`,
-        `Free time left: ${formatHours(clock.remainingFreeHours)}. Current speed: ${formatQty(clock.liftRatePerHour, c.unit)} per hour.`,
+        `Free hours left: ${formatHours(clock.remainingFreeHours)}. Current speed: ${formatQty(clock.liftRatePerHour, c.unit)} per hour.`,
         clock.requiredRatePerHour ? `Needed speed: ${formatQty(clock.requiredRatePerHour, c.unit)} per hour — send more trucks.` : 'Send more trucks now.',
-        clock.projectedPenalty ? `Expected penalty at this speed: ${formatINR(clock.projectedPenalty)}.` : '',
+        clock.projectedPenalty ? `Expected late fee at this speed: ${formatINR(clock.projectedPenalty)}.` : '',
       ].filter(Boolean),
       consignment: c._id,
     });

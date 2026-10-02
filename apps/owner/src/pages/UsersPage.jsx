@@ -1,10 +1,13 @@
-import { KeyIcon, PencilSquareIcon, PlusIcon } from '@heroicons/react/24/outline';
+import { Edit03, Key01, Plus, UserPlus01, Users01 } from '@untitledui/icons';
 import { useState } from 'react';
 import { EMAIL_LOGIN_ROLES, formatDateTime, ROLE_LABELS, ROLES } from '@feather/shared';
-import { Badge, Button, Card, DataTable, Loading, Modal, PageHeader, SelectField, SwitchField, TextField, useForm } from '@feather/ui';
+import { Avatar, Button, CheckboxField, DataTable, Loading, Modal, PageHeader, SelectField, StatusBadge, SwitchField, TextField } from '@feather/ui';
+import { useForm } from '@feather/ui';
 import { useAction, useGet } from '@/lib/hooks.js';
 
 const isOffice = (role) => EMAIL_LOGIN_ROLES.includes(role);
+const initials = (n = '') => n.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+const ROLE_TONE = { owner: 'brand', dispatch_operator: 'info', siding_supervisor: 'neutral', gate_inspector: 'neutral' };
 
 export default function UsersPage() {
   const { data, isLoading } = useGet('/users');
@@ -14,37 +17,64 @@ export default function UsersPage() {
   return (
     <>
       <PageHeader
-        title="Users"
-        subtitle="Office staff log in with an email code. Field staff log in with phone + PIN. Each person only sees what their role needs."
-        actions={<Button icon={PlusIcon} onClick={() => setEditing({})}>New user</Button>}
+        help="owner-setup"
+        breadcrumbs={[{ label: 'Setup' }]}
+        title="Staff"
+        subtitle="Office staff log in with an email code. Field staff log in with phone + PIN. Each person only sees what their job needs."
+        actions={
+          <Button iconLeading={Plus} onPress={() => setEditing({})}>
+            New staff member
+          </Button>
+        }
       />
-      <Card>
-        {isLoading ? (
-          <Loading />
-        ) : (
-          <DataTable
-            rows={data?.users}
-            columns={[
-              { key: 'name', header: 'Name', render: (u) => <span className="font-medium">{u.name}</span> },
-              { key: 'role', header: 'Role', render: (u) => <Badge tone={u.role === ROLES.OWNER ? 'brand' : 'neutral'}>{ROLE_LABELS[u.role]}</Badge> },
-              { key: 'login', header: 'Login', render: (u) => (isOffice(u.role) ? u.email : `+91 ${u.phone}`) },
-              { key: 'where', header: 'Works at', render: (u) => (u.locations?.length ? u.locations.map((l) => l.name).join(', ') : 'All places') },
-              { key: 'last', header: 'Last login', render: (u) => formatDateTime(u.lastLoginAt) },
-              { key: 'active', header: 'Status', render: (u) => (u.active ? <Badge tone="good">Active</Badge> : <Badge>Off</Badge>) },
-              {
-                key: 'act',
-                header: '',
-                render: (u) => (
-                  <div className="flex gap-1">
-                    <Button size="sm" variant="ghost" icon={PencilSquareIcon} onClick={() => setEditing(u)}>Edit</Button>
-                    {!isOffice(u.role) && <Button size="sm" variant="ghost" icon={KeyIcon} onClick={() => setResetting(u)}>PIN</Button>}
+      {isLoading ? (
+        <Loading />
+      ) : (
+        <DataTable
+          title="Everyone with access"
+          badge={<span className="text-sm text-tertiary">{data?.users.length}</span>}
+          rows={data?.users}
+          emptyIcon={Users01}
+          columns={[
+            {
+              key: 'name',
+              header: 'Name',
+              sortable: true,
+              render: (u) => (
+                <div className="flex items-center gap-3">
+                  <Avatar size="md" initials={initials(u.name)} />
+                  <div>
+                    <p className="font-medium text-primary">{u.name}</p>
+                    <p className="text-xs text-tertiary">{isOffice(u.role) ? u.email : `+91 ${u.phone}`}</p>
                   </div>
-                ),
-              },
-            ]}
-          />
-        )}
-      </Card>
+                </div>
+              ),
+            },
+            { key: 'role', header: 'Role', sortable: true, render: (u) => <StatusBadge tone={ROLE_TONE[u.role]}>{ROLE_LABELS[u.role]}</StatusBadge> },
+            { key: 'login', header: 'Logs in with', render: (u) => (isOffice(u.role) ? 'Email code' : 'Phone + PIN') },
+            { key: 'where', header: 'Works at', render: (u) => (u.locations?.length ? u.locations.map((l) => l.name).join(', ') : 'All places') },
+            { key: 'last', header: 'Last login', sortable: true, sortValue: (u) => u.lastLoginAt ?? '', render: (u) => formatDateTime(u.lastLoginAt) },
+            { key: 'active', header: 'Status', render: (u) => <StatusBadge tone={u.active ? 'good' : 'neutral'}>{u.active ? 'Active' : 'Off'}</StatusBadge> },
+            {
+              key: 'act',
+              header: '',
+              align: 'right',
+              render: (u) => (
+                <div className="flex justify-end gap-1">
+                  {!isOffice(u.role) && (
+                    <Button size="sm" color="tertiary" iconLeading={Key01} onPress={() => setResetting(u)}>
+                      PIN
+                    </Button>
+                  )}
+                  <Button size="sm" color="tertiary" iconLeading={Edit03} onPress={() => setEditing(u)}>
+                    Edit
+                  </Button>
+                </div>
+              ),
+            },
+          ]}
+        />
+      )}
       {editing && <UserForm existing={editing._id ? editing : null} onClose={() => setEditing(null)} />}
       {resetting && <PinDialog user={resetting} onClose={() => setResetting(null)} />}
     </>
@@ -63,10 +93,12 @@ function UserForm({ existing, onClose }) {
     active: existing?.active ?? true,
   });
   const v = f.values;
-  const save = useAction(
-    (api, b) => (existing ? api.patch(`/users/${existing._id}`, b) : api.post('/users', b)),
-    { success: 'User saved', invalidate: ['/users'], onSuccess: onClose, onError: (e) => f.setErrors(e.fields ?? { name: e.message }) },
-  );
+  const save = useAction((api, b) => (existing ? api.patch(`/users/${existing._id}`, b) : api.post('/users', b)), {
+    success: 'Staff member saved',
+    invalidate: ['/users'],
+    onSuccess: onClose,
+    onError: (e) => f.setErrors(e.fields ?? { name: e.message }),
+  });
   const office = isOffice(v.role);
   const relevant = (locations?.items ?? []).filter((l) =>
     v.role === ROLES.SIDING_SUPERVISOR ? ['siding', 'port'].includes(l.type) : v.role === ROLES.GATE_INSPECTOR ? ['stockyard', 'customer_site'].includes(l.type) : false,
@@ -77,47 +109,49 @@ function UserForm({ existing, onClose }) {
     <Modal
       open
       onClose={onClose}
-      title={existing ? 'Edit user' : 'New user'}
-      description={existing ? 'Changing role or turning a user off logs them out on every phone.' : undefined}
+      icon={UserPlus01}
+      title={existing ? 'Edit staff member' : 'New staff member'}
+      description={existing ? 'Changing role or turning someone off logs them out on every phone.' : undefined}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button color="secondary" onPress={onClose}>
+            Cancel
+          </Button>
           <Button
-            loading={save.isPending}
-            onClick={() => save.mutate({ ...v, email: office ? v.email : undefined, phone: office ? undefined : v.phone, pin: office || existing ? undefined : v.pin, locations: office ? [] : v.locations })}
+            isLoading={save.isPending}
+            onPress={() => save.mutate({ ...v, email: office ? v.email : undefined, phone: office ? undefined : v.phone, pin: office || existing ? undefined : v.pin, locations: office ? [] : v.locations })}
           >
             Save
           </Button>
         </>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-2">
         <TextField className="sm:col-span-2" label="Name" value={v.name} onChange={f.set('name')} error={f.errors.name} required />
         <SelectField className="sm:col-span-2" label="Role" value={v.role} onChange={f.set('role')} options={Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))} />
         {office ? (
           <TextField className="sm:col-span-2" label="Email (for login code)" type="email" value={v.email} onChange={f.set('email')} error={f.errors.email} required />
         ) : (
           <>
-            <TextField label="Mobile number" inputMode="tel" value={v.phone} onChange={f.set('phone')} error={f.errors.phone} required />
+            <TextField label="Mobile number" inputMode="tel" prefix="+91" value={v.phone} onChange={f.set('phone')} error={f.errors.phone} required />
             {!existing && <TextField label="PIN (4–6 digits)" inputMode="numeric" value={v.pin} onChange={f.set('pin')} error={f.errors.pin} required />}
           </>
         )}
         {!office && (
           <fieldset className="sm:col-span-2">
-            <legend className="text-sm font-semibold text-ink-800">Works at</legend>
-            <p className="text-xs text-ink-500">They only see trucks and rakes for these places.</p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <legend className="text-sm font-medium text-secondary">Works at</legend>
+            <p className="text-sm text-tertiary">They only see trucks and shipments for these places.</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {relevant.map((l) => (
-                <label key={l._id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ring-1 ring-ink-200">
-                  <input type="checkbox" className="size-4 accent-brand-600" checked={v.locations.includes(l._id)} onChange={() => toggle(l._id)} />
-                  {l.name}
-                </label>
+                <div key={l._id} className="rounded-lg p-3 ring-1 ring-secondary">
+                  <CheckboxField label={l.name} checked={v.locations.includes(l._id)} onChange={() => toggle(l._id)} />
+                </div>
               ))}
-              {relevant.length === 0 && <p className="text-sm text-ink-500">No matching places yet.</p>}
+              {relevant.length === 0 && <p className="text-sm text-tertiary">No matching places yet.</p>}
             </div>
           </fieldset>
         )}
-        {existing && <SwitchField className="sm:col-span-2" label="Active" hint="Turn off to block login immediately." checked={v.active} onChange={f.set('active')} />}
+        {existing && <SwitchField className="sm:col-span-2" label="Active" hint="Turn off to block login at once." checked={v.active} onChange={f.set('active')} />}
       </div>
     </Modal>
   );
@@ -131,16 +165,21 @@ function PinDialog({ user, onClose }) {
       open
       size="sm"
       onClose={onClose}
+      icon={Key01}
       title={`New PIN for ${user.name}`}
       description="They will be logged out on all phones. Tell them the new PIN in person."
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button loading={save.isPending} disabled={!/^\d{4,6}$/.test(pin)} onClick={() => save.mutate()}>Set PIN</Button>
+          <Button color="secondary" onPress={onClose}>
+            Cancel
+          </Button>
+          <Button isLoading={save.isPending} isDisabled={!/^\d{4,6}$/.test(pin)} onPress={() => save.mutate()}>
+            Set PIN
+          </Button>
         </>
       }
     >
-      <TextField label="New PIN (4–6 digits)" inputMode="numeric" maxLength={6} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} />
+      <TextField label="New PIN (4–6 digits)" inputMode="numeric" maxLength={6} value={pin} onChange={(v) => setPin(v.replace(/\D/g, ''))} />
     </Modal>
   );
 }

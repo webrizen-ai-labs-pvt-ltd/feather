@@ -1,14 +1,1 @@
-@import 'tailwindcss';
-@import '@feather/ui/theme.css';
-
-@source '../../../packages/ui/src';
-
-/* Field phones: slightly larger base text, no accidental zoom on inputs. */
-@layer base {
-  html {
-    font-size: 17px;
-  }
-  body {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-}
+@import '@feather/ui/styles.css';

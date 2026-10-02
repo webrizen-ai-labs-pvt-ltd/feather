@@ -1,6 +1,7 @@
-import { CheckCircleIcon, CloudArrowUpIcon, NoSymbolIcon } from '@heroicons/react/24/outline';
+import { Send01, SlashCircle01, Truck01 } from '@untitledui/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
+import { Form } from 'react-aria-components';
 import {
   CREDIT_REASON_LABELS,
   fieldErrors,
@@ -11,7 +12,8 @@ import {
   LOCATION_TYPES,
   normalizeVehicleNo,
 } from '@feather/shared';
-import { Button, Card, ErrorNote, NumberField, PhotoCapture, SelectField, TextField, newId, toOptions, useApi, useAuth, useForm } from '@feather/ui';
+import { Alert, Button, ErrorNote, NumberField, PhotoCapture, SelectField, TextField, newId, toOptions, useApi, useAuth, useForm } from '@feather/ui';
+import { FormStep, Readout, SavedScreen } from '@/components/FieldKit.jsx';
 import { useCachedGet } from '@/lib/cached.js';
 import { useOutbox } from '@/lib/outbox.jsx';
 
@@ -31,8 +33,8 @@ const EMPTY = {
 };
 
 /**
- * One form for every truck that leaves: from a rake / ship (siding supervisor)
- * or from our stockyard to a customer (dispatch). Works offline.
+ * One form for every truck that leaves: from a shipment (loading staff)
+ * or from our warehouse to a customer (dispatch). Works offline.
  * @param {{ source: 'rake' | 'yard' }} props
  */
 export default function TruckLoadingForm({ source }) {
@@ -67,7 +69,7 @@ export default function TruckLoadingForm({ source }) {
     () =>
       (places?.items ?? [])
         .filter((l) => (fromRake ? true : l.type === LOCATION_TYPES.CUSTOMER_SITE))
-        .map((l) => ({ value: l._id, label: l.name, hint: l.type === 'stockyard' ? 'Our stockyard' : `Customer site${l.customer?.name ? ` · ${l.customer.name}` : ''}` })),
+        .map((l) => ({ value: l._id, label: l.name, hint: l.type === 'stockyard' ? 'Our warehouse' : `Delivery site${l.customer?.name ? ` · ${l.customer.name}` : ''}` })),
     [places, fromRake],
   );
 
@@ -136,45 +138,36 @@ export default function TruckLoadingForm({ source }) {
 
   if (done) {
     return (
-      <Card className="p-6 text-center">
-        {done.queued ? <CloudArrowUpIcon className="mx-auto size-14 text-brand-600" /> : <CheckCircleIcon className="mx-auto size-14 text-emerald-600" />}
-        <h2 className="mt-3 text-xl font-bold">{done.queued ? 'Saved on phone' : 'Truck sent'}</h2>
-        <p className="mt-1 text-ink-600">
-          {formatVehicleNo(done.vehicleNo)}
-          {done.trip && (
-            <>
-              {' · '}Trip <b>{done.trip.tripNo}</b>
-              {done.trip.challanNo && (
-                <>
-                  {' · '}Challan <b>{done.trip.challanNo}</b>
-                </>
-              )}
-            </>
-          )}
-        </p>
-        {done.queued && <p className="mt-2 text-sm text-ink-500">No network now. It will be sent automatically when the signal comes back.</p>}
-        <Button size="xl" className="mt-6" onClick={reset}>Load next truck</Button>
-      </Card>
+      <SavedScreen
+        queued={done.queued}
+        title="Truck sent"
+        lines={[formatVehicleNo(done.vehicleNo), done.trip && `Trip ${done.trip.tripNo}${done.trip.challanNo ? ` · Delivery note ${done.trip.challanNo}` : ''}`].filter(Boolean)}
+        action={
+          <Button size="xl" className="w-full" iconLeading={Truck01} onPress={reset}>
+            Load next truck
+          </Button>
+        }
+      />
     );
   }
 
   const blocked = error?.code === 'CREDIT_BLOCKED';
 
   return (
-    <form onSubmit={onSubmit} className="space-y-5" noValidate>
-      <Card className="space-y-4 p-4">
+    <Form onSubmit={onSubmit} validationBehavior="aria" className="flex flex-col gap-5">
+      <FormStep n={1} title="Where is it going?" description={fromRake ? 'Pick the shipment the material comes from.' : 'Pick the warehouse and the customer order.'}>
         {fromRake ? (
           <SelectField
             big
             required
-            label="Rake / ship"
+            label="Shipment"
             value={v.consignment}
             onChange={f.set('consignment')}
             error={f.errors.consignment}
-            options={(rakes?.items ?? []).map((c) => ({ value: c._id, label: `${c.referenceType} ${c.referenceNo}`, hint: `${c.material?.name} · ${c.location?.name}` }))}
+            options={(rakes?.items ?? []).map((c) => ({ value: c._id, label: c.referenceNo, hint: `${c.material?.name} · ${c.location?.name}` }))}
           />
         ) : (
-          <SelectField big required label="From stockyard" value={v.sourceLocation} onChange={f.set('sourceLocation')} error={f.errors.consignment} options={toOptions(yards?.items)} />
+          <SelectField big required label="From warehouse" value={v.sourceLocation} onChange={f.set('sourceLocation')} error={f.errors.consignment} options={toOptions(yards?.items)} />
         )}
         <SelectField big required label="Going to" value={v.destination} onChange={(val) => (f.set('destination')(val), f.set('order')(''))} error={f.errors.destination} options={destinationOptions} />
         {toCustomer && (
@@ -189,54 +182,47 @@ export default function TruckLoadingForm({ source }) {
             placeholder={siteOrders.length ? 'Choose order' : 'No open order for this site'}
           />
         )}
-      </Card>
+      </FormStep>
 
-      <Card className="space-y-4 p-4">
+      <FormStep n={2} title="Truck and driver" description="If the truck came before, driver and company fill in by themselves.">
         <TextField big required label="Truck number" placeholder="MH12AB1234" autoCapitalize="characters" value={v.vehicleNo} onChange={f.set('vehicleNo')} onBlur={lookupVehicle} error={f.errors.vehicleNo} />
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-5 sm:grid-cols-2">
           <TextField big required label="Driver name" value={v.driverName} onChange={f.set('driverName')} error={f.errors.driverName} />
           <TextField big required label="Driver mobile" inputMode="tel" value={v.driverPhone} onChange={f.set('driverPhone')} error={f.errors.driverPhone} />
         </div>
-        <SelectField big required label="Transporter" value={v.transporter} onChange={f.set('transporter')} error={f.errors.transporter} options={toOptions(transporters?.items)} />
-      </Card>
+        <SelectField big required label="Truck company" value={v.transporter} onChange={f.set('transporter')} error={f.errors.transporter} options={toOptions(transporters?.items)} />
+      </FormStep>
 
-      <Card className="space-y-4 p-4">
-        <p className="font-semibold">Weighbridge slip</p>
-        <div className="grid grid-cols-2 gap-3">
-          <NumberField big required label="Gross (loaded)" suffix="T" value={v.grossWeight} onChange={f.set('grossWeight')} error={f.errors.grossWeight} />
+      <FormStep n={3} title="Weighbridge slip" description="Type the numbers exactly as printed, then take a photo of the slip.">
+        <div className="grid grid-cols-2 gap-4">
+          <NumberField big required label="Full truck" suffix="T" value={v.grossWeight} onChange={f.set('grossWeight')} error={f.errors.grossWeight} />
           <NumberField big required label="Empty truck" suffix="T" value={v.tareWeight} onChange={f.set('tareWeight')} error={f.errors.tareWeight} />
         </div>
-        <div className="rounded-lg bg-ink-100 px-4 py-3 text-center">
-          <span className="text-sm text-ink-600">Net load</span>
-          <p className="tabular text-2xl font-bold">{net === null ? '—' : `${formatNumber(net, 3)} T`}</p>
-        </div>
+        <Readout label="Material weight" value={net === null ? '—' : `${formatNumber(net, 3)} T`} />
         {isBagged && <NumberField big required label="Bags loaded" inputMode="numeric" value={v.loadedBags} onChange={f.set('loadedBags')} error={f.errors.loadedBags} />}
         <TextField label="Slip number" value={v.slipNo} onChange={f.set('slipNo')} />
         <PhotoCapture value={photo} onChange={(p) => (setPhoto(p), f.setErrors((e) => ({ ...e, photo: undefined })))} error={f.errors.photo} />
-      </Card>
+      </FormStep>
 
       {blocked ? (
-        <div role="alert" className="rounded-xl bg-red-700 p-4 text-white">
-          <p className="flex items-center gap-2 text-lg font-bold">
-            <NoSymbolIcon className="size-6" /> Dispatch blocked
-          </p>
-          <p className="mt-1">{error.message}</p>
-          {error.data?.reasons && <p className="mt-1 text-sm">{error.data.reasons.map((r) => CREDIT_REASON_LABELS[r]).join(' · ')}</p>}
+        <Alert tone="error" icon={SlashCircle01} title="Customer on hold — do not load this truck">
+          <p>{error.message}</p>
+          {error.data?.reasons && <p className="mt-1">{error.data.reasons.map((r) => CREDIT_REASON_LABELS[r]).join(' · ')}</p>}
           {error.data?.exposure !== undefined && (
-            <p className="mt-1 text-sm">
-              Exposure {formatINR(error.data.exposure)} · limit {formatINR(error.data.creditLimit)} · overdue {formatINR(error.data.overdueAmount)}
+            <p className="mt-1">
+              Total owed {formatINR(error.data.exposure)} · limit {formatINR(error.data.creditLimit)} · overdue {formatINR(error.data.overdueAmount)}
             </p>
           )}
-          <p className="mt-2 text-sm">Do not load this truck. The owner has been told.</p>
-        </div>
+          <p className="mt-1">The owner has been told.</p>
+        </Alert>
       ) : (
         <ErrorNote error={error} />
       )}
 
-      <Button type="submit" size="xl" loading={busy}>
+      <Button type="submit" size="xl" className="w-full" iconLeading={Send01} isLoading={busy}>
         Save & send truck
       </Button>
-      <p className="text-center text-xs text-ink-500">Out time is taken from the server clock. Entered by {user.name}.</p>
-    </form>
+      <p className="text-center text-xs text-tertiary">The time is taken from the server clock. Entered by {user.name}.</p>
+    </Form>
   );
 }

@@ -1,20 +1,23 @@
-import { ArrowLeftIcon, PencilSquareIcon } from '@heroicons/react/24/outline';
+import { BankNote01, Edit03, File06, Key01, ShieldTick, Wallet02 } from '@untitledui/icons';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { useParams } from 'react-router';
 import { AGING_BUCKETS, CREDIT_REASON_LABELS, formatDate, formatDateTime, formatINR, formatLakh } from '@feather/shared';
 import {
-  Badge,
+  Alert,
+  Avatar,
   Button,
   Card,
-  CardHeader,
   ConfirmDialog,
+  cx,
   DataTable,
   Loading,
+  Meter,
+  MetricCard,
   Modal,
   NumberField,
   PageHeader,
   SelectField,
-  Stat,
+  StatusBadge,
   Tabs,
   TextAreaField,
   TextField,
@@ -23,12 +26,14 @@ import {
 import { useAction, useGet } from '@/lib/hooks.js';
 import { CustomerForm } from '@/pages/CustomersPage.jsx';
 
+const initials = (n = '') => n.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+
 export default function CustomerDetailPage() {
   const { id } = useParams();
   const { data, isLoading } = useGet(`/sales/customers/${id}/ledger`);
   const [dialog, setDialog] = useState(null);
   const revoke = useAction((api, { overrideId, reason }) => api.post(`/sales/overrides/${overrideId}/revoke`, { reason }), {
-    success: 'Override stopped',
+    success: 'Special permission stopped',
     invalidate: ['/sales', '/admin'],
     onSuccess: () => setDialog(null),
   });
@@ -36,32 +41,79 @@ export default function CustomerDetailPage() {
   const { customer, credit, aging, invoices, payments, overrides, sites } = data;
   const now = new Date();
   const liveOverride = overrides.find((o) => !o.revokedAt && new Date(o.validUntil) > now && o.uses < o.maxUses);
+  const usedPct = credit.creditLimit ? (credit.exposure / credit.creditLimit) * 100 : 0;
 
   return (
     <>
       <PageHeader
-        back={
-          <Link to="/customers" className="mb-2 inline-flex items-center gap-1 text-sm font-medium text-ink-500 hover:text-ink-800">
-            <ArrowLeftIcon className="size-4" /> Customer credit
-          </Link>
-        }
+        help="owner-credit"
+        breadcrumbs={[{ label: 'Customers', href: '/customers' }]}
         title={customer.name}
-        subtitle={[customer.phone, customer.email, customer.gstin].filter(Boolean).join(' · ')}
+        subtitle={[customer.phone, customer.email, customer.gstin].filter(Boolean).join(' · ') || 'No contact details yet'}
         actions={
           <>
-            {credit.blocked ? <Badge tone={liveOverride ? 'warn' : 'bad'}>{liveOverride ? 'Override active' : 'Dispatch blocked'}</Badge> : <Badge tone="good">Dispatch allowed</Badge>}
-            <Button variant="secondary" icon={PencilSquareIcon} onClick={() => setDialog('edit')}>Edit</Button>
-            <Button variant="secondary" onClick={() => setDialog('invoice')}>Add bill</Button>
-            <Button onClick={() => setDialog('payment')}>Record payment</Button>
-            {credit.blocked && !liveOverride && <Button variant="danger" onClick={() => setDialog('override')}>Allow override</Button>}
+            <Button color="secondary" iconLeading={Edit03} onPress={() => setDialog('edit')}>
+              Edit
+            </Button>
+            <Button color="secondary" iconLeading={File06} onPress={() => setDialog('invoice')}>
+              Add bill
+            </Button>
+            <Button iconLeading={BankNote01} onPress={() => setDialog('payment')}>
+              Record payment
+            </Button>
           </>
         }
       />
 
+      <Card className="mb-6 p-5 md:p-6">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
+          <div className="flex items-center gap-4">
+            <Avatar size="xl" initials={initials(customer.name)} />
+            <div>
+              <p className="text-lg font-semibold text-primary">{customer.name}</p>
+              <div className="mt-1">
+                {credit.blocked ? (
+                  <StatusBadge tone={liveOverride ? 'warn' : 'bad'} size="md">
+                    {liveOverride ? 'Allowed anyway' : 'On hold — no new trucks'}
+                  </StatusBadge>
+                ) : (
+                  <StatusBadge tone="good" size="md">
+                    Can get trucks
+                  </StatusBadge>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex-1">
+            <div className="mb-2 flex flex-wrap justify-between gap-2 text-sm">
+              <span className="font-medium text-secondary">
+                {formatLakh(credit.exposure)} owed of {formatLakh(credit.creditLimit)} limit
+              </span>
+              <span className={cx('font-semibold', usedPct > 100 ? 'text-error-primary' : 'text-tertiary')}>{Math.round(usedPct)}% used</span>
+            </div>
+            <Meter value={credit.exposure} max={credit.creditLimit} tone={usedPct > 100 ? 'bad' : usedPct > 80 ? 'warn' : 'good'} />
+          </div>
+        </div>
+      </Card>
+
       {credit.blocked && (
-        <Card className="mb-6 border-l-4 border-red-500 p-4 text-sm">
-          <p className="font-semibold text-ink-900">Why blocked</p>
-          <ul className="mt-1 list-inside list-disc text-ink-700">
+        <Alert
+          tone={liveOverride ? 'warning' : 'error'}
+          className="mb-6"
+          title={liveOverride ? 'Allowed anyway for now' : 'Why this customer is on hold'}
+          actions={
+            liveOverride ? (
+              <Button size="sm" color="secondary" onPress={() => setDialog({ revoke: liveOverride._id })}>
+                Stop allowing
+              </Button>
+            ) : (
+              <Button size="sm" color="primary-destructive" iconLeading={Key01} onPress={() => setDialog('override')}>
+                Allow anyway
+              </Button>
+            )
+          }
+        >
+          <ul className="list-inside list-disc">
             {credit.reasons.map((r) => (
               <li key={r}>
                 {CREDIT_REASON_LABELS[r]}
@@ -70,35 +122,33 @@ export default function CustomerDetailPage() {
             ))}
           </ul>
           {liveOverride && (
-            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg bg-amber-50 px-3 py-2 text-amber-900">
-              <span>
-                Override: {liveOverride.maxUses - liveOverride.uses} challan(s) left until {formatDateTime(liveOverride.validUntil)} — “{liveOverride.reason}”
-              </span>
-              <Button size="sm" variant="secondary" onClick={() => setDialog({ revoke: liveOverride._id })}>Stop override</Button>
-            </div>
+            <p className="mt-2">
+              {liveOverride.maxUses - liveOverride.uses} truck(s) left until {formatDateTime(liveOverride.validUntil)} — “{liveOverride.reason}”
+            </p>
           )}
-        </Card>
+        </Alert>
       )}
 
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Credit limit" value={formatLakh(credit.creditLimit)} sub={`${customer.creditDays ?? 'Default'} credit days`} />
-        <Stat label="Unpaid bills" value={formatLakh(credit.outstanding)} />
-        <Stat label="On the road (not billed)" value={formatLakh(credit.unbilledValue)} />
-        <Stat label="Available" value={formatLakh(credit.available)} tone={credit.available < 0 ? 'bad' : 'good'} />
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-6">
+        <MetricCard label="Credit limit" value={formatLakh(credit.creditLimit)} sub={`${customer.creditDays ?? 'Default'} credit days`} />
+        <MetricCard label="Unpaid bills" value={formatLakh(credit.outstanding)} />
+        <MetricCard label="On the road (not billed)" value={formatLakh(credit.unbilledValue)} />
+        <MetricCard label="Still available" value={formatLakh(credit.available)} tone={credit.available < 0 ? 'bad' : 'good'} />
       </div>
 
-      <Card className="mb-6 p-4">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <Card className="mb-6 p-5 md:p-6">
+        <p className="mb-4 text-sm font-semibold text-primary">How old the dues are</p>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           {AGING_BUCKETS.map((b) => (
-            <div key={b.key}>
-              <p className="text-xs text-ink-500">{b.label}</p>
-              <p className={`tabular text-lg font-bold ${b.min > 45 && aging[b.key] ? 'text-red-700' : 'text-ink-900'}`}>{formatLakh(aging[b.key])}</p>
+            <div key={b.key} className={cx('rounded-lg p-4 ring-1 ring-secondary', b.min > 45 && aging[b.key] ? 'bg-error-primary' : 'bg-secondary')}>
+              <p className="text-xs text-tertiary">{b.label}</p>
+              <p className={cx('mt-1 text-lg font-semibold tabular-nums', b.min > 45 && aging[b.key] ? 'text-error-primary' : 'text-primary')}>{formatLakh(aging[b.key])}</p>
             </div>
           ))}
         </div>
       </Card>
 
-      <Card className="p-4">
+      <Card className="p-5 md:p-6">
         <Tabs
           tabs={[
             {
@@ -108,14 +158,19 @@ export default function CustomerDetailPage() {
                 <DataTable
                   dense
                   rows={invoices}
-                  empty="No bills yet. Bills are made automatically when a delivery is received at site."
+                  empty="No bills yet. Bills are made by Feather when a delivery is received at the site."
                   columns={[
-                    { key: 'no', header: 'Bill no.', render: (i) => i.invoiceNo },
-                    { key: 'date', header: 'Date', render: (i) => formatDate(i.invoiceDate) },
-                    { key: 'trip', header: 'Challan / truck', render: (i) => (i.trip ? `${i.trip.challanNo ?? i.trip.tripNo} · ${i.trip.vehicleNo}` : i.reference ?? 'Manual') },
+                    { key: 'no', header: 'Bill no.', render: (i) => <span className="font-medium text-primary">{i.invoiceNo}</span> },
+                    { key: 'date', header: 'Date', sortable: true, sortValue: (i) => i.invoiceDate, render: (i) => formatDate(i.invoiceDate) },
+                    { key: 'trip', header: 'Delivery note / truck', render: (i) => (i.trip ? `${i.trip.challanNo ?? i.trip.tripNo} · ${i.trip.vehicleNo}` : i.reference ?? 'Manual') },
                     { key: 'amt', header: 'Amount', align: 'right', render: (i) => formatINR(i.amount) },
                     { key: 'paid', header: 'Paid', align: 'right', render: (i) => formatINR(i.paidAmount) },
-                    { key: 'due', header: 'Due', align: 'right', render: (i) => <b>{formatINR(i.amount - i.paidAmount)}</b> },
+                    {
+                      key: 'due',
+                      header: 'Due',
+                      align: 'right',
+                      render: (i) => (i.amount - i.paidAmount > 0 ? <span className="font-semibold text-primary">{formatINR(i.amount - i.paidAmount)}</span> : <StatusBadge tone="good">Paid</StatusBadge>),
+                    },
                   ]}
                 />
               ),
@@ -130,35 +185,35 @@ export default function CustomerDetailPage() {
                   empty="No payments yet."
                   columns={[
                     { key: 'date', header: 'Received', render: (p) => formatDate(p.receivedAt) },
-                    { key: 'ref', header: 'Reference', render: (p) => p.reference ?? '—' },
-                    { key: 'amt', header: 'Amount', align: 'right', render: (p) => formatINR(p.amount) },
+                    { key: 'ref', header: 'Cheque / UTR', render: (p) => p.reference ?? '—' },
+                    { key: 'amt', header: 'Amount', align: 'right', render: (p) => <span className="font-medium text-primary">{formatINR(p.amount)}</span> },
                     { key: 'adv', header: 'Advance left', align: 'right', render: (p) => (p.unallocated ? formatINR(p.unallocated) : '—') },
                   ]}
                 />
               ),
             },
             {
-              label: 'Overrides',
+              label: 'Allowed anyway',
               count: overrides.length,
               content: (
                 <DataTable
                   dense
                   rows={overrides}
-                  empty="No overrides given."
+                  empty="You have not allowed this customer anyway yet."
                   columns={[
                     { key: 'at', header: 'Given', render: (o) => formatDateTime(o.createdAt) },
                     { key: 'by', header: 'By', render: (o) => o.grantedBy?.name },
                     { key: 'reason', header: 'Reason', render: (o) => o.reason },
-                    { key: 'uses', header: 'Used', render: (o) => `${o.uses} / ${o.maxUses}` },
+                    { key: 'uses', header: 'Trucks used', render: (o) => `${o.uses} / ${o.maxUses}` },
                     { key: 'until', header: 'Valid until', render: (o) => (o.revokedAt ? 'Stopped' : formatDateTime(o.validUntil)) },
                   ]}
                 />
               ),
             },
             {
-              label: 'Sites',
+              label: 'Delivery sites',
               count: sites.length,
-              content: <DataTable dense rows={sites} empty="No delivery sites. Add one under Materials & places." columns={[{ key: 'name', header: 'Site' }, { key: 'address', header: 'Address' }]} />,
+              content: <DataTable dense rows={sites} empty="No delivery sites. Add one under Products & places." columns={[{ key: 'name', header: 'Site' }, { key: 'address', header: 'Address' }]} />,
             },
           ]}
         />
@@ -172,8 +227,8 @@ export default function CustomerDetailPage() {
         <ConfirmDialog
           open
           needReason
-          title="Stop this override?"
-          confirmLabel="Stop override"
+          title="Stop this special permission?"
+          confirmLabel="Stop allowing"
           variant="danger"
           loading={revoke.isPending}
           onClose={() => setDialog(null)}
@@ -202,16 +257,23 @@ function MoneyDialog({ kind, customerId, onClose }) {
       open
       onClose={onClose}
       size="sm"
-      title={isPayment ? 'Record payment' : 'Add bill (e.g. opening balance)'}
+      icon={isPayment ? BankNote01 : File06}
+      tone={isPayment ? 'success' : 'gray'}
+      title={isPayment ? 'Record payment' : 'Add bill'}
+      description={isPayment ? 'The oldest unpaid bills are cleared first.' : 'For old amounts from your earlier books (opening balance).'}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button loading={save.isPending} onClick={() => save.mutate(v)}>Save</Button>
+          <Button color="secondary" onPress={onClose}>
+            Cancel
+          </Button>
+          <Button isLoading={save.isPending} onPress={() => save.mutate(v)}>
+            Save
+          </Button>
         </>
       }
     >
-      <div className="space-y-4">
-        <NumberField label="Amount" suffix="₹" value={v.amount} onChange={f.set('amount')} error={f.errors.amount} required />
+      <div className="flex flex-col gap-5">
+        <NumberField label="Amount" prefix="₹" value={v.amount} onChange={f.set('amount')} error={f.errors.amount} required />
         <TextField label={isPayment ? 'Received on' : 'Bill date'} type="date" value={v.date} onChange={f.set('date')} />
         <TextField label={isPayment ? 'Cheque / UTR no.' : 'Reference'} value={v.reference} onChange={f.set('reference')} />
       </div>
@@ -222,7 +284,7 @@ function MoneyDialog({ kind, customerId, onClose }) {
 function OverrideDialog({ customer, credit, onClose }) {
   const f = useForm({ reason: '', hours: '24', maxUses: '1' });
   const save = useAction((api, v) => api.post(`/sales/customers/${customer._id}/override`, v), {
-    success: 'Override given. Dispatch can make the allowed challans now.',
+    success: 'Special permission given. Dispatch can send the allowed trucks now.',
     invalidate: ['/sales', '/admin'],
     onSuccess: onClose,
     onError: (e) => f.setErrors(e.fields ?? { reason: e.message }),
@@ -232,19 +294,36 @@ function OverrideDialog({ customer, credit, onClose }) {
     <Modal
       open
       onClose={onClose}
-      title={`Allow dispatch for ${customer.name}?`}
-      description={`Exposure is ${formatINR(credit.exposure)} against a limit of ${formatINR(credit.creditLimit)}. This lets supervisors make a limited number of challans.`}
+      icon={ShieldTick}
+      tone="warning"
+      title={`Allow trucks for ${customer.name} anyway?`}
+      description={`They owe ${formatINR(credit.exposure)} against a limit of ${formatINR(credit.creditLimit)}. This lets your staff send a limited number of trucks.`}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant="danger" loading={save.isPending} onClick={() => save.mutate(v)}>Give override</Button>
+          <Button color="secondary" onPress={onClose}>
+            Cancel
+          </Button>
+          <Button color="primary-destructive" isLoading={save.isPending} onPress={() => save.mutate(v)}>
+            Allow anyway
+          </Button>
         </>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <SelectField label="Valid for" value={v.hours} onChange={f.set('hours')} options={[['4', '4 hours'], ['12', '12 hours'], ['24', '1 day'], ['72', '3 days'], ['168', '7 days']].map(([value, label]) => ({ value, label }))} />
-        <NumberField label="Number of challans" value={v.maxUses} onChange={f.set('maxUses')} error={f.errors.maxUses} />
-        <TextAreaField className="sm:col-span-2" label="Reason" hint="Saved in audit log and emailed." value={v.reason} onChange={f.set('reason')} error={f.errors.reason} />
+      <div className="grid gap-5 sm:grid-cols-2">
+        <SelectField
+          label="Valid for"
+          value={v.hours}
+          onChange={f.set('hours')}
+          options={[
+            ['4', '4 hours'],
+            ['12', '12 hours'],
+            ['24', '1 day'],
+            ['72', '3 days'],
+            ['168', '7 days'],
+          ].map(([value, label]) => ({ value, label }))}
+        />
+        <NumberField label="Number of trucks" value={v.maxUses} onChange={f.set('maxUses')} error={f.errors.maxUses} />
+        <TextAreaField className="sm:col-span-2" label="Reason" hint="Saved in History and emailed to you." value={v.reason} onChange={f.set('reason')} error={f.errors.reason} />
       </div>
     </Modal>
   );

@@ -91,20 +91,20 @@ export async function createLoading({ input, file, user }) {
   let material;
   if (input.consignment) {
     consignment = await Consignment.findById(input.consignment);
-    if (!consignment) throw notFound('Rake / ship');
+    if (!consignment) throw notFound('Shipment');
     if ([CONSIGNMENT_STATUS.RELEASED, CONSIGNMENT_STATUS.CLOSED].includes(consignment.status)) {
-      throw badRequest('This rake / ship is already released. You cannot load from it.');
+      throw badRequest('This shipment is already finished. You cannot load from it.');
     }
     sourceLocation = consignment.location;
     material = await Material.findById(consignment.material);
   } else {
-    if (user.role === ROLES.SIDING_SUPERVISOR) throw forbidden('Siding supervisors can only load from a rake or ship.');
+    if (user.role === ROLES.SIDING_SUPERVISOR) throw forbidden('Loading staff can only load from a shipment.');
     const loc = await Location.findById(input.sourceLocation);
-    if (!loc || loc.type !== LOCATION_TYPES.STOCKYARD) throw badRequest('Choose a stockyard to dispatch from.');
+    if (!loc || loc.type !== LOCATION_TYPES.STOCKYARD) throw badRequest('Choose a warehouse to dispatch from.');
     if (!input.order) throw badRequest('Choose the customer order for this dispatch.', { fields: { order: 'Required' } });
     sourceLocation = loc._id;
   }
-  if (!worksAt(user, sourceLocation)) throw forbidden('You are not assigned to this siding / yard.');
+  if (!worksAt(user, sourceLocation)) throw forbidden('You are not assigned to this unloading point / warehouse.');
 
   // --- Where is it going?
   const destination = await Location.findById(input.destination);
@@ -113,14 +113,14 @@ export async function createLoading({ input, file, user }) {
 
   let order = null;
   if (destination.type === LOCATION_TYPES.CUSTOMER_SITE || input.order) {
-    if (!input.order) throw badRequest('This is a customer site. Choose the customer order.', { fields: { order: 'Required' } });
+    if (!input.order) throw badRequest('This is a delivery site. Choose the customer order.', { fields: { order: 'Required' } });
     order = await Order.findById(input.order);
     if (!order || order.status !== 'open') throw badRequest('This order is not open.');
     if (String(order.deliverySite) !== String(destination._id)) throw badRequest('The order is for a different site.');
     if (!material) material = await Material.findById(order.material);
     if (String(order.material) !== String(material._id)) throw badRequest('The order is for a different material.');
   } else if (destination.type !== LOCATION_TYPES.STOCKYARD) {
-    throw badRequest('Truck must go to a stockyard or a customer site.');
+    throw badRequest('Truck must go to a warehouse or a delivery site.');
   }
 
   // --- Quantity
@@ -132,7 +132,7 @@ export async function createLoading({ input, file, user }) {
   if (!consignment) {
     const available = await bookQty(sourceLocation, material._id, STOCK_GRADES.PRIME);
     if (qty > available) {
-      throw badRequest(`Book stock at this yard is only ${formatQty(available, material.unit)}. Ask the owner to check the stock count.`);
+      throw badRequest(`System stock at this warehouse is only ${formatQty(available, material.unit)}. Ask the owner to check the stock count.`);
     }
   }
 
@@ -151,7 +151,7 @@ export async function createLoading({ input, file, user }) {
         const override = await activeOverride(order.customer);
         if (!override) {
           await creditBlockedAlert(order.customer, check, user);
-          throw new HttpError(403, 'Dispatch blocked: this customer has crossed the credit limit or has overdue payment. Ask the owner.', {
+          throw new HttpError(403, 'Customer on hold: this customer has crossed the credit limit or has overdue payment. Ask the owner.', {
             code: 'CREDIT_BLOCKED',
             data: user.role === ROLES.DISPATCH_OPERATOR || user.role === ROLES.OWNER ? check : { reasons: check.reasons },
           });
@@ -169,7 +169,7 @@ export async function createLoading({ input, file, user }) {
   if (input.wasOffline) flags.push(TRIP_FLAGS.OFFLINE_ENTRY);
 
   const transporter = await Transporter.findById(input.transporter);
-  if (!transporter || !transporter.active) throw badRequest('Choose the transporter.');
+  if (!transporter || !transporter.active) throw badRequest('Choose the truck company.');
 
   if (credit?.override) {
     const used = await consumeOverride(credit.override, tripId);
@@ -251,7 +251,7 @@ export async function createLoading({ input, file, user }) {
     await raiseAlert({
       type: ALERT_TYPES.CREDIT_OVERRIDE,
       severity: ALERT_SEVERITY.INFO,
-      title: `Dispatch sent under credit override — ${trip.challanNo}`,
+      title: `Dispatch sent under special permission — ${trip.challanNo}`,
       lines: [`Reason: ${credit.overrideReason}`, `Value: ${formatINR(qty * order.ratePerUnit)}`],
       trip: trip._id,
       customer: order.customer,
@@ -271,13 +271,13 @@ async function creditBlockedAlert(customerId, check, user) {
   await raiseAlert({
     type: ALERT_TYPES.CREDIT_BLOCK,
     severity: ALERT_SEVERITY.CRITICAL,
-    title: `Dispatch blocked for ${customer?.name}`,
+    title: `Customer on hold for ${customer?.name}`,
     lines: [
-      `${user.name} tried to make a dispatch challan.`,
+      `${user.name} tried to send a truck to them.`,
       ...check.reasons.map((r) => CREDIT_REASON_LABELS[r]),
       `Outstanding: ${formatINR(check.outstanding)}. On the road (not billed): ${formatINR(check.unbilledValue)}.`,
       `Credit limit: ${formatINR(check.creditLimit)}. Overdue: ${formatINR(check.overdueAmount)}.`,
-      'Open the owner app to allow a one-time override if needed.',
+      'Open the owner app to allow a one-time special permission if needed.',
     ],
     customer: customerId,
   });
@@ -401,7 +401,7 @@ export async function receiveTrip({ tripId, input, file, user }) {
   if (!trip) throw notFound('Trip');
   if (trip.receiptClientId && trip.receiptClientId === input.clientId) return { trip, duplicate: true };
   if (trip.status !== TRIP_STATUS.IN_TRANSIT) throw badRequest('This truck is already received or cancelled.');
-  if (!worksAt(user, trip.destination)) throw forbidden('This truck is not coming to your yard / site.');
+  if (!worksAt(user, trip.destination)) throw forbidden('This truck is not coming to your warehouse / site.');
 
   const [material, settings, order, destination] = await Promise.all([
     Material.findById(trip.material),
@@ -480,11 +480,11 @@ async function lockedTripAlert(trip, material, result) {
     const b = trip.receipt.bags;
     lines.push(`Bags: billed ${b.invoice}, good ${b.sound}, torn ${b.burst}, hard/wet ${b.lumpy}, light ${b.underweight}, missing ${b.missing}${b.excess ? `, extra ${b.excess}` : ''}.`);
   }
-  lines.push(`Deduction from freight: ${formatINR(result.freight.deduction)}. Freight payment is LOCKED until you review.`);
+  lines.push(`Deduction from truck payment: ${formatINR(result.freight.deduction)}. Truck payment is ON HOLD until you review.`);
   await raiseAlert({
     type: isBagged ? ALERT_TYPES.BAG_DAMAGE : ALERT_TYPES.TRANSIT_LOSS,
     severity: ALERT_SEVERITY.CRITICAL,
-    title: `Freight locked — ${trip.tripNo}`,
+    title: `Payment on hold — ${trip.tripNo}`,
     lines,
     trip: trip._id,
     consignment: trip.consignment,

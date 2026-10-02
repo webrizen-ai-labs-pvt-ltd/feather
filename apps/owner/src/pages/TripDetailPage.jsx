@@ -1,48 +1,43 @@
-import { ArrowLeftIcon, MapPinIcon } from '@heroicons/react/24/outline';
+import { AlertTriangle, BankNote01, CheckCircle, Edit03, MarkerPin01, Phone, Scales02, Truck01, XCircle } from '@untitledui/icons';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { useParams } from 'react-router';
+import { formatDateTime, formatHours, formatINR, formatNumber, formatPct, formatQty, formatVehicleNo, TRIP_FLAG_LABELS } from '@feather/shared';
 import {
-  formatDateTime,
-  formatHours,
-  formatINR,
-  formatNumber,
-  formatPct,
-  formatQty,
-  formatVehicleNo,
-  TRIP_FLAG_LABELS,
-} from '@feather/shared';
-import {
-  Badge,
+  Alert,
   Button,
   Card,
   CardHeader,
   ConfirmDialog,
+  cx,
   DetailList,
-  FlagList,
   FreightBadge,
   Loading,
   Modal,
   NumberField,
   PageHeader,
+  StatusBadge,
   TextAreaField,
+  TrackingProgress,
+  TrackingTimeline,
   TripStatusBadge,
+  truckTracking,
   useForm,
 } from '@feather/ui';
 import { useAction, useGet } from '@/lib/hooks.js';
 
 function Photo({ side, label }) {
-  if (!side?.photo?.url) return <p className="text-sm text-ink-500">No photo</p>;
+  if (!side?.photo?.url) return <div className="flex h-40 items-center justify-center rounded-lg bg-secondary text-sm text-tertiary">No photo</div>;
   const { lat, lng, accuracy } = side.photo;
   return (
     <figure>
-      <a href={side.photo.url} target="_blank" rel="noreferrer">
-        <img src={side.photo.url} alt={label} className="max-h-72 w-full rounded-lg bg-ink-100 object-contain ring-1 ring-ink-200" />
+      <a href={side.photo.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg ring-1 ring-secondary">
+        <img src={side.photo.url} alt={label} className="h-48 w-full bg-secondary object-contain" />
       </a>
-      <figcaption className="mt-1.5 flex items-center gap-1 text-xs text-ink-500">
-        <MapPinIcon className="size-4" />
+      <figcaption className="mt-2 flex items-center gap-1.5 text-xs text-tertiary">
+        <MarkerPin01 className="size-3.5" aria-hidden />
         {lat != null ? (
           <a className="underline" href={`https://maps.google.com/?q=${lat},${lng}`} target="_blank" rel="noreferrer">
-            {lat.toFixed(5)}, {lng.toFixed(5)} (±{accuracy} m)
+            Taken at {lat.toFixed(4)}, {lng.toFixed(4)} (±{accuracy} m)
           </a>
         ) : (
           'No GPS location'
@@ -52,26 +47,35 @@ function Photo({ side, label }) {
   );
 }
 
-function Weighment({ title, side, extra }) {
+/** One weighbridge reading, shown as a column of the side-by-side comparison. */
+function Weighing({ title, side, place, extra = [] }) {
   return (
-    <Card>
-      <CardHeader title={title} subtitle={side?.at ? `${formatDateTime(side.at)}${side.wasOffline ? ' · entered offline' : ''}` : 'Not yet'} />
-      {side?.at && (
-        <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
-          <DetailList
-            className="sm:grid-cols-1"
-            items={[
-              ['Gross', formatQty(side.gross)],
-              ['Empty (tare)', formatQty(side.tare)],
-              ['Net', <b key="n">{formatQty(side.net)}</b>],
-              ['Slip no.', side.slipNo],
-              ...extra,
-            ]}
-          />
+    <div className="flex flex-col gap-4">
+      <div>
+        <p className="text-sm font-semibold text-primary">{title}</p>
+        <p className="text-xs text-tertiary">{side?.at ? `${place ?? ''} · ${formatDateTime(side.at)}${side.wasOffline ? ' · entered offline' : ''}` : 'Not yet'}</p>
+      </div>
+      {side?.at ? (
+        <>
+          <dl className="grid grid-cols-3 gap-3 rounded-lg bg-secondary p-3 text-center">
+            {[
+              ['Full truck', side.gross],
+              ['Empty truck', side.tare],
+              ['Material', side.net],
+            ].map(([l, v], i) => (
+              <div key={l}>
+                <dt className="text-xs text-tertiary">{l}</dt>
+                <dd className={cx('mt-0.5 font-semibold tabular-nums', i === 2 ? 'text-lg text-primary' : 'text-md text-secondary')}>{formatNumber(v, 3)}</dd>
+              </div>
+            ))}
+          </dl>
+          <DetailList columns={1} items={[['Slip no.', side.slipNo], ...extra]} />
           <Photo side={side} label={title} />
-        </div>
+        </>
+      ) : (
+        <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-primary text-sm text-tertiary">Waiting for the truck to arrive</div>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -90,145 +94,179 @@ export default function TripDetailPage() {
   const bagged = t.unit === 'bag';
   const b = t.receipt?.bags;
   const fr = t.freight ?? {};
+  const track = truckTracking(t);
+  const problems = (t.flags ?? []).filter((f) => !['offline_entry', 'credit_override'].includes(f));
 
   return (
     <>
       <PageHeader
-        back={
-          <Link to="/trips" className="mb-2 inline-flex items-center gap-1 text-sm font-medium text-ink-500 hover:text-ink-800">
-            <ArrowLeftIcon className="size-4" /> Trips
-          </Link>
-        }
-        title={`${t.tripNo} · ${formatVehicleNo(t.vehicleNo)}`}
-        subtitle={`${t.material?.name} · ${t.sourceLocation?.name} → ${t.destination?.name}${t.customer ? ` (${t.customer.name})` : ''}`}
+        help="owner-freight"
+        breadcrumbs={[{ label: 'Truck trips', href: '/trips' }]}
+        title={formatVehicleNo(t.vehicleNo)}
+        crumbLabel={t.tripNo}
+        subtitle={`Trip ${t.tripNo}${t.challanNo ? ` · Delivery note ${t.challanNo}` : ''} · ${t.material?.name}${t.customer ? ` for ${t.customer.name}` : ''}`}
         actions={
           <>
             <TripStatusBadge status={t.status} />
-            <Button variant="secondary" onClick={() => setDialog('correct')} disabled={t.status === 'cancelled'}>Correct weights</Button>
-            {t.status === 'in_transit' && <Button variant="danger" onClick={() => setDialog('cancel')}>Cancel trip</Button>}
+            <Button color="secondary" iconLeading={Edit03} isDisabled={t.status === 'cancelled'} onPress={() => setDialog('correct')}>
+              Correct weights
+            </Button>
+            {t.status === 'in_transit' && (
+              <Button color="secondary-destructive" iconLeading={XCircle} onPress={() => setDialog('cancel')}>
+                Cancel trip
+              </Button>
+            )}
           </>
         }
       />
 
-      {t.flags?.length > 0 && (
-        <Card className="mb-6 border-l-4 border-red-500 p-4">
-          <p className="font-semibold text-ink-900">Issues found</p>
-          <ul className="mt-2 list-inside list-disc text-sm text-ink-700">
-            {t.flags.map((f) => (
+      <TrackingProgress className="mb-6" steps={track.steps} current={track.current} tone={track.tone} headline={track.headline} subline={track.subline} />
+
+      {problems.length > 0 && (
+        <Alert tone={fr.status === 'locked' ? 'error' : 'warning'} icon={AlertTriangle} className="mb-6" title="Problems found on this trip">
+          <ul className="mt-1 list-inside list-disc">
+            {problems.map((f) => (
               <li key={f}>{TRIP_FLAG_LABELS[f]}</li>
             ))}
           </ul>
-        </Card>
+        </Alert>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Weighment
-          title="Loading (source weighbridge)"
-          side={t.loading}
-          extra={[bagged && ['Bags loaded', formatNumber(t.loading?.bags, 0)], ['Driver', `${t.driverName ?? ''} ${t.driverPhone ?? ''}`], ['Transporter', t.transporter?.name]].filter(Boolean)}
-        />
-        <Weighment
-          title="Receipt (destination weighbridge)"
-          side={t.receipt}
-          extra={[['GRN no.', t.receipt?.grnNo], t.receipt?.remarks && ['Remarks', t.receipt.remarks]].filter(Boolean)}
-        />
-      </div>
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-3">
-        <Card className="p-5">
-          <h2 className="mb-3 font-semibold">Weight check</h2>
-          {t.variance?.lossPct != null ? (
-            <DetailList
-              className="sm:grid-cols-1"
-              items={[
-                ['Loss on road', `${formatQty(t.variance.lossQty)} (${formatPct(t.variance.lossPct)})`],
-                ['Allowed', `${formatPct(t.variance.tolerancePct)} = ${formatQty(t.variance.allowedQty)}`],
-                ['Chargeable loss', formatQty(t.variance.excessLossQty)],
-                ['Time on road', t.receipt?.at ? formatHours((new Date(t.receipt.at) - new Date(t.loading.at)) / 3_600_000) : '—'],
-              ]}
-            />
-          ) : (
-            <p className="text-sm text-ink-500">Available after the truck is received.</p>
-          )}
-        </Card>
-
-        {bagged && (
-          <Card className="p-5">
-            <h2 className="mb-3 font-semibold">Bag count</h2>
-            {b ? (
-              <table className="tabular w-full text-sm">
-                <tbody className="divide-y divide-ink-100">
-                  {[
-                    ['Billed', b.invoice],
-                    ['Good', b.sound],
-                    ['Torn / burst', b.burst],
-                    ['Hard / wet', b.lumpy],
-                    [`Light (avg ${b.underweightAvgKg ?? '—'} kg)`, b.underweight],
-                    ['Missing', b.missing],
-                    b.excess ? ['Extra (count error?)', b.excess] : null,
-                  ]
-                    .filter(Boolean)
-                    .map(([label, value]) => (
-                      <tr key={label}>
-                        <td className="py-1.5 text-ink-600">{label}</td>
-                        <td className="py-1.5 text-right font-semibold">{formatNumber(value ?? 0, 0)}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className="text-sm text-ink-500">Not counted yet.</p>
+      <div className="grid gap-6 xl:grid-cols-3">
+        <div className="flex flex-col gap-6 xl:col-span-2">
+          <Card>
+            <CardHeader icon={Scales02} title="Weight check" subtitle="Weighed when it left and again when it arrived. Feather compares the two." />
+            <div className="grid gap-6 p-5 md:grid-cols-2 md:p-6">
+              <Weighing
+                title="When it left"
+                place={t.sourceLocation?.name}
+                side={t.loading}
+                extra={[bagged && ['Bags loaded', formatNumber(t.loading?.bags, 0)]].filter(Boolean)}
+              />
+              <Weighing title="When it arrived" place={t.destination?.name} side={t.receipt} extra={[['Receipt no.', t.receipt?.grnNo], t.receipt?.remarks && ['Remarks', t.receipt.remarks]].filter(Boolean)} />
+            </div>
+            {t.variance?.lossPct != null && (
+              <div className="grid grid-cols-2 gap-4 border-t border-secondary p-5 md:grid-cols-4 md:p-6">
+                <Stat label="Lost on the way" value={`${formatQty(t.variance.lossQty)}`} sub={formatPct(t.variance.lossPct)} bad={t.variance.lossPct > t.variance.tolerancePct} />
+                <Stat label="Allowed loss" value={formatQty(t.variance.allowedQty)} sub={formatPct(t.variance.tolerancePct)} />
+                <Stat label="Charged loss" value={formatQty(t.variance.excessLossQty)} bad={t.variance.excessLossQty > 0} />
+                <Stat label="Time on the road" value={t.receipt?.at ? formatHours((new Date(t.receipt.at) - new Date(t.loading.at)) / 3_600_000) : '—'} />
+              </div>
             )}
           </Card>
-        )}
 
-        <Card className="p-5">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="font-semibold">Freight settlement</h2>
-            <FreightBadge status={fr.status} />
-          </div>
-          <table className="tabular w-full text-sm">
-            <tbody className="divide-y divide-ink-100">
-              <tr><td className="py-1.5 text-ink-600">Freight ({formatINR(fr.rate)} × {formatNumber(t.loading?.qty, 3)})</td><td className="py-1.5 text-right">{formatINR(fr.amount)}</td></tr>
-              <tr><td className="py-1.5 text-ink-600">Advance paid</td><td className="py-1.5 text-right">− {formatINR(fr.advance)}</td></tr>
-              <tr><td className="py-1.5 text-ink-600">Deduction for loss / damage</td><td className="py-1.5 text-right text-red-700">− {formatINR(fr.deduction)}</td></tr>
-              <tr className="font-bold"><td className="py-2">Balance to pay</td><td className="py-2 text-right">{formatINR(fr.balance)}</td></tr>
-            </tbody>
-          </table>
-          {fr.recoverable > 0 && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-800">Recover {formatINR(fr.recoverable)} from the transporter.</p>}
-          {fr.waived && <Badge tone="warn" className="mt-2">Deduction waived: {fr.reviewNote}</Badge>}
-          {t.credit?.overrideReason && <Badge tone="warn" className="mt-2">Credit override: {t.credit.overrideReason}</Badge>}
-          <div className="mt-4 flex flex-wrap gap-2">
-            {fr.status === 'locked' && (
-              <>
-                <Button variant="success" loading={approve.isPending} onClick={() => approve.mutate()}>Approve with deduction</Button>
-                <Button variant="secondary" onClick={() => setDialog('waive')}>Waive deduction</Button>
-              </>
-            )}
-            {fr.status === 'ready' && (
-              <>
-                <Button loading={paid.isPending} onClick={() => paid.mutate()}>Mark paid</Button>
-                {fr.deduction > 0 && <Button variant="secondary" onClick={() => setDialog('waive')}>Waive deduction</Button>}
-              </>
-            )}
-            {['on_hold', 'locked', 'ready'].includes(fr.status) && <Button variant="ghost" onClick={() => setDialog('advance')}>Record advance</Button>}
-          </div>
-        </Card>
+          {bagged && (
+            <Card>
+              <CardHeader title="Bag count" subtitle="Counted by receiving staff. Missing bags are worked out by Feather." />
+              {b ? (
+                <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-3 md:grid-cols-6 md:p-6">
+                  {[
+                    ['Billed', b.invoice, 'neutral'],
+                    ['Good', b.sound, 'good'],
+                    ['Torn', b.burst, b.burst ? 'warn' : 'neutral'],
+                    ['Hard / wet', b.lumpy, b.lumpy ? 'bad' : 'neutral'],
+                    [`Light (${b.underweightAvgKg ?? '—'} kg)`, b.underweight, b.underweight ? 'warn' : 'neutral'],
+                    ['Missing', b.missing, b.missing ? 'bad' : 'neutral'],
+                  ].map(([label, value, tone]) => (
+                    <Stat key={label} label={label} value={formatNumber(value ?? 0, 0)} bad={tone === 'bad'} warn={tone === 'warn'} good={tone === 'good'} />
+                  ))}
+                </div>
+              ) : (
+                <p className="p-6 text-sm text-tertiary">Not counted yet.</p>
+              )}
+            </Card>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-6">
+          <Card>
+            <CardHeader icon={BankNote01} title="Truck payment" badge={<FreightBadge status={fr.status} />} />
+            <div className="p-5 md:p-6">
+              <dl className="space-y-3 text-sm">
+                <Row label={`Truck rate ${formatINR(fr.rate)} × ${formatNumber(t.loading?.qty, 3)}`} value={formatINR(fr.amount)} />
+                <Row label="Advance paid" value={`− ${formatINR(fr.advance)}`} />
+                <Row label="Cut for loss / damage" value={`− ${formatINR(fr.deduction)}`} bad={fr.deduction > 0} />
+                <div className="border-t border-secondary pt-3">
+                  <Row label={<span className="font-semibold text-primary">Balance to pay</span>} value={<span className="text-lg font-semibold text-primary">{formatINR(fr.balance)}</span>} />
+                </div>
+              </dl>
+              {fr.recoverable > 0 && <Alert className="mt-4" title={`Recover ${formatINR(fr.recoverable)} from the truck company.`} />}
+              {fr.waived && <p className="mt-4 text-sm text-tertiary">Paid in full: {fr.reviewNote}</p>}
+              {t.credit?.overrideReason && (
+                <div className="mt-4">
+                  <StatusBadge tone="warn">Allowed anyway: {t.credit.overrideReason}</StatusBadge>
+                </div>
+              )}
+              <div className="mt-5 flex flex-col gap-3">
+                {fr.status === 'locked' && (
+                  <>
+                    <Button iconLeading={CheckCircle} isLoading={approve.isPending} onPress={() => approve.mutate()}>
+                      Pay with cut
+                    </Button>
+                    <Button color="secondary" onPress={() => setDialog('waive')}>
+                      Pay in full
+                    </Button>
+                  </>
+                )}
+                {fr.status === 'ready' && (
+                  <>
+                    <Button iconLeading={BankNote01} isLoading={paid.isPending} onPress={() => paid.mutate()}>
+                      Mark paid
+                    </Button>
+                    {fr.deduction > 0 && (
+                      <Button color="secondary" onPress={() => setDialog('waive')}>
+                        Pay in full
+                      </Button>
+                    )}
+                  </>
+                )}
+                {['on_hold', 'locked', 'ready'].includes(fr.status) && (
+                  <Button color="link-gray" onPress={() => setDialog('advance')}>
+                    Record advance
+                  </Button>
+                )}
+              </div>
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader icon={Truck01} title="Truck & driver" />
+            <div className="p-5 md:p-6">
+              <DetailList
+                columns={1}
+                items={[
+                  ['Truck company', t.transporter?.name],
+                  ['Driver', t.driverName],
+                  [
+                    'Driver mobile',
+                    t.driverPhone ? (
+                      <a href={`tel:${t.driverPhone}`} className="inline-flex items-center gap-1 text-brand-secondary">
+                        <Phone className="size-4" aria-hidden /> {t.driverPhone}
+                      </a>
+                    ) : (
+                      '—'
+                    ),
+                  ],
+                  ['From', t.sourceLocation?.name],
+                  ['To', t.destination?.name],
+                  t.consignment && ['Shipment', t.consignment.referenceNo],
+                ]}
+              />
+            </div>
+          </Card>
+
+          <TrackingTimeline events={track.events} />
+        </div>
       </div>
-
-      <Card className="mt-6 p-5">
-        <h2 className="mb-3 font-semibold">All issues</h2>
-        <FlagList flags={t.flags} />
-      </Card>
 
       <ConfirmDialog
         open={dialog === 'waive'}
         onClose={() => setDialog(null)}
         loading={waive.isPending}
         needReason
-        title="Waive the deduction?"
-        message="The transporter will be paid in full. Your reason is saved in the audit log."
-        confirmLabel="Waive"
+        title="Pay in full?"
+        message="The truck company will be paid without any cut. Your reason is saved in History."
+        confirmLabel="Pay in full"
         variant="danger"
         onConfirm={(r) => waive.mutate(r)}
       />
@@ -238,7 +276,7 @@ export default function TripDetailPage() {
         loading={cancel.isPending}
         needReason
         title="Cancel this trip?"
-        message="Use this only for a wrong entry. Quantities go back to the rake / yard."
+        message="Use this only for a wrong entry. The quantity goes back to the shipment or warehouse."
         confirmLabel="Cancel trip"
         variant="danger"
         onConfirm={(r) => cancel.mutate(r)}
@@ -246,6 +284,25 @@ export default function TripDetailPage() {
       {dialog === 'correct' && <CorrectDialog trip={t} onClose={() => setDialog(null)} />}
       {dialog === 'advance' && <AdvanceDialog trip={t} onClose={() => setDialog(null)} />}
     </>
+  );
+}
+
+function Stat({ label, value, sub, bad, warn, good }) {
+  return (
+    <div>
+      <p className="text-xs text-tertiary">{label}</p>
+      <p className={cx('mt-0.5 text-lg font-semibold tabular-nums', bad ? 'text-error-primary' : warn ? 'text-warning-primary' : good ? 'text-success-primary' : 'text-primary')}>{value}</p>
+      {sub && <p className="text-xs text-tertiary">{sub}</p>}
+    </div>
+  );
+}
+
+function Row({ label, value, bad }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <dt className="text-tertiary">{label}</dt>
+      <dd className={cx('font-medium tabular-nums', bad ? 'text-error-primary' : 'text-secondary')}>{value}</dd>
+    </div>
   );
 }
 
@@ -269,14 +326,17 @@ function CorrectDialog({ trip, onClose }) {
     <Modal
       open
       onClose={onClose}
+      icon={Edit03}
       title="Correct weights"
-      description="Use only when the typed weight does not match the slip photo. Loss, deductions, stock and bills are worked out again."
+      description="Use only when the typed weight does not match the slip photo. Loss, cuts, stock and bills are worked out again."
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button color="secondary" onPress={onClose}>
+            Cancel
+          </Button>
           <Button
-            loading={save.isPending}
-            onClick={() =>
+            isLoading={save.isPending}
+            onPress={() =>
               save.mutate({
                 reason: v.reason,
                 loadingGross: v.loadingGross,
@@ -290,13 +350,13 @@ function CorrectDialog({ trip, onClose }) {
         </>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <NumberField label="Loading gross" suffix="MT" value={v.loadingGross} onChange={f.set('loadingGross')} error={f.errors.loadingGross} />
-        <NumberField label="Loading tare" suffix="MT" value={v.loadingTare} onChange={f.set('loadingTare')} error={f.errors.loadingTare} />
+      <div className="grid gap-5 sm:grid-cols-2">
+        <NumberField label="Full weight at loading" suffix="MT" value={v.loadingGross} onChange={f.set('loadingGross')} error={f.errors.loadingGross} />
+        <NumberField label="Empty weight at loading" suffix="MT" value={v.loadingTare} onChange={f.set('loadingTare')} error={f.errors.loadingTare} />
         {received && (
           <>
-            <NumberField label="Receipt gross" suffix="MT" value={v.receiptGross} onChange={f.set('receiptGross')} error={f.errors.receiptGross} />
-            <NumberField label="Receipt tare" suffix="MT" value={v.receiptTare} onChange={f.set('receiptTare')} error={f.errors.receiptTare} />
+            <NumberField label="Full weight at receiving" suffix="MT" value={v.receiptGross} onChange={f.set('receiptGross')} error={f.errors.receiptGross} />
+            <NumberField label="Empty weight at receiving" suffix="MT" value={v.receiptTare} onChange={f.set('receiptTare')} error={f.errors.receiptTare} />
           </>
         )}
         <TextAreaField className="sm:col-span-2" label="Reason" value={v.reason} onChange={f.set('reason')} error={f.errors.reason} />
@@ -317,15 +377,20 @@ function AdvanceDialog({ trip, onClose }) {
       open
       onClose={onClose}
       size="sm"
-      title="Advance paid to transporter"
+      icon={BankNote01}
+      title="Advance paid to truck company"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button loading={save.isPending} onClick={() => save.mutate()}>Save</Button>
+          <Button color="secondary" onPress={onClose}>
+            Cancel
+          </Button>
+          <Button isLoading={save.isPending} onPress={() => save.mutate()}>
+            Save
+          </Button>
         </>
       }
     >
-      <NumberField label="Total advance" suffix="₹" value={advance} onChange={(e) => setAdvance(e.target.value)} />
+      <NumberField label="Total advance" prefix="₹" value={advance} onChange={setAdvance} />
     </Modal>
   );
 }

@@ -9,10 +9,10 @@ export const ROLES = Object.freeze({
 });
 
 export const ROLE_LABELS = Object.freeze({
-  owner: 'Owner / Finance',
-  siding_supervisor: 'Loading / Siding Supervisor',
-  gate_inspector: 'Yard / Gate Inspector',
-  dispatch_operator: 'Dispatch & Logistics',
+  owner: 'Owner',
+  siding_supervisor: 'Loading staff',
+  gate_inspector: 'Receiving staff',
+  dispatch_operator: 'Dispatch office',
 });
 
 /** Office roles log in with an email OTP. Field roles log in with phone + PIN. */
@@ -26,9 +26,9 @@ export const CONSIGNMENT_MODES = Object.freeze({
 });
 
 export const CONSIGNMENT_MODE_LABELS = Object.freeze({
-  rail_rake: 'Railway rake',
+  rail_rake: 'Train',
   river_barge: 'River barge',
-  coastal_ship: 'Coastal ship',
+  coastal_ship: 'Ship',
 });
 
 /** Rail uses a Railway Receipt (RR); water uses a Bill of Lading (BL). */
@@ -48,7 +48,7 @@ export const CONSIGNMENT_STATUS = Object.freeze({
 export const CONSIGNMENT_STATUS_LABELS = Object.freeze({
   expected: 'On the way',
   placed: 'Unloading',
-  released: 'Released',
+  released: 'Emptied',
   closed: 'Closed',
 });
 
@@ -70,10 +70,10 @@ export const LOCATION_TYPES = Object.freeze({
 });
 
 export const LOCATION_TYPE_LABELS = Object.freeze({
-  siding: 'Railway siding',
-  port: 'Port / wharf',
-  stockyard: 'Stockyard',
-  customer_site: 'Customer site',
+  siding: 'Railway station',
+  port: 'Port',
+  stockyard: 'Warehouse',
+  customer_site: 'Delivery site',
 });
 
 export const TRIP_SOURCE = Object.freeze({
@@ -102,7 +102,7 @@ export const FREIGHT_STATUS = Object.freeze({
 
 export const FREIGHT_STATUS_LABELS = Object.freeze({
   on_hold: 'Waiting for receipt',
-  locked: 'Locked — needs review',
+  locked: 'On hold — needs review',
   ready: 'Ready to pay',
   paid: 'Paid',
 });
@@ -126,8 +126,8 @@ export const STOCK_GRADES = Object.freeze({
 });
 
 export const STOCK_GRADE_LABELS = Object.freeze({
-  prime: 'Prime (saleable)',
-  seconds: 'Seconds (discount)',
+  prime: 'Good',
+  seconds: 'Discount',
   rejected: 'Rejected',
 });
 
@@ -156,7 +156,7 @@ export const TRIP_FLAG_LABELS = Object.freeze({
   slow_transit: 'Took much longer than normal',
   breakdown: 'Breakdown reported',
   offline_entry: 'Entered while offline',
-  credit_override: 'Sent under owner credit override',
+  credit_override: 'Sent under owner special permission',
 });
 
 export const ALERT_SEVERITY = Object.freeze({ INFO: 'info', WARNING: 'warning', CRITICAL: 'critical' });

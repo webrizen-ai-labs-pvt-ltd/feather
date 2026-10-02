@@ -149,11 +149,11 @@ router.post('/customers/:id/override', ownerOnly, validate(creditOverrideSchema)
   await raiseAlert({
     type: ALERT_TYPES.CREDIT_OVERRIDE,
     severity: ALERT_SEVERITY.INFO,
-    title: `Credit override given for ${customer.name}`,
+    title: `Allowed anyway given for ${customer.name}`,
     lines: [
-      `${req.user.name} allowed ${req.valid.maxUses} dispatch challan(s) for the next ${req.valid.hours} hours.`,
+      `${req.user.name} allowed ${req.valid.maxUses} delivery note(s) for the next ${req.valid.hours} hours.`,
       `Reason: ${req.valid.reason}`,
-      `Current exposure: ${formatINR(credit.exposure)} against limit ${formatINR(credit.creditLimit)}.`,
+      `Current total owed: ${formatINR(credit.exposure)} against limit ${formatINR(credit.creditLimit)}.`,
     ],
     customer: customer._id,
   });

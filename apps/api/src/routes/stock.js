@@ -44,11 +44,11 @@ router.post('/counts', requireRole(OWNER, GATE_INSPECTOR), validate(stockCountSc
   const dup = await StockCount.findOne({ clientId: d.clientId });
   if (dup) return res.json({ ok: true, id: dup._id });
   const [location, material] = await Promise.all([Location.findById(d.location), Material.findById(d.material)]);
-  if (!location || location.type !== LOCATION_TYPES.STOCKYARD) throw badRequest('Choose a stockyard.');
+  if (!location || location.type !== LOCATION_TYPES.STOCKYARD) throw badRequest('Choose a warehouse.');
   if (!material) throw badRequest('Choose the material.');
   const u = req.user;
   if (u.role === GATE_INSPECTOR && u.locations?.length && !u.locations.some((l) => String(l) === String(location._id))) {
-    throw forbidden('You are not assigned to this yard.');
+    throw forbidden('You are not assigned to this warehouse.');
   }
   const book = await bookQty(location._id, material._id, d.grade);
   const diffQty = round(d.physicalQty - book);
@@ -72,7 +72,7 @@ router.post('/counts', requireRole(OWNER, GATE_INSPECTOR), validate(stockCountSc
       title: `Stock mismatch at ${location.name} — ${material.name}`,
       lines: [
         `Counted by ${u.name}: ${formatQty(d.physicalQty, material.unit)}.`,
-        `Book stock: ${formatQty(book, material.unit)}. Difference: ${formatQty(diffQty, material.unit)}${diffPct !== null ? ` (${diffPct}%)` : ''}.`,
+        `System stock: ${formatQty(book, material.unit)}. Difference: ${formatQty(diffQty, material.unit)}${diffPct !== null ? ` (${diffPct}%)` : ''}.`,
       ],
     });
   }

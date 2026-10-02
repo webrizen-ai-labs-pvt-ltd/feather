@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 
 /**
  * Base Vite config shared by the Owner and Operations apps.
- *  - `@/` → the app's own src/
+ *  - `@/` → the app's own src/, `@uui/` → the Untitled UI library in packages/ui/src/uui
  *  - `/api` is proxied to the backend in development (no CORS, same-origin photos)
  */
 export function appConfig({ root, port, plugins = [] }) {
@@ -12,7 +12,10 @@ export function appConfig({ root, port, plugins = [] }) {
   return {
     plugins: [react(), tailwindcss(), ...plugins],
     resolve: {
-      alias: { '@': path.resolve(root, 'src') },
+      alias: {
+        '@uui': path.resolve(import.meta.dirname, '../ui/src/uui'),
+        '@': path.resolve(root, 'src'),
+      },
     },
     server: {
       port,

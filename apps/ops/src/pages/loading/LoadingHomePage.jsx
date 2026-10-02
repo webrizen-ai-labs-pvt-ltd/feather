@@ -1,12 +1,10 @@
-import { ArrowUpTrayIcon, TruckIcon } from '@heroicons/react/24/outline';
+import { Package, Play, Train, Truck01, Upload01 } from '@untitledui/icons';
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
 import { formatQty, formatTime, formatVehicleNo } from '@feather/shared';
-import { Button, Card, ConfirmDialog, DemurrageClock, EmptyState, Loading, TripStatusBadge, useAction, useAuth, useGet } from '@feather/ui';
+import { Button, ConfirmDialog, DataTable, DemurrageClock, EmptyState, Loading, PageHeader, Section, TripStatusBadge, useAction, useAuth, useGet } from '@feather/ui';
 
 export default function LoadingHomePage() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const { data, isLoading } = useGet('/consignments', { status: 'expected,placed' }, { refetchInterval: 60_000 });
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -19,79 +17,77 @@ export default function LoadingHomePage() {
   });
 
   return (
-    <div className="space-y-5">
-      <Button size="xl" icon={ArrowUpTrayIcon} onClick={() => navigate('/loading/new')}>
-        Load a truck
-      </Button>
+    <>
+      <PageHeader
+        help="siding-rakes"
+        title={`Hello, ${user.name?.split(' ')[0]}`}
+        crumbLabel="Shipments"
+        subtitle="Shipments at your unloading point, and trucks you loaded today."
+        actions={
+          <Button size="lg" iconLeading={Upload01} href="/loading/new" className="w-full sm:w-auto">
+            Load a truck
+          </Button>
+        }
+      />
 
-      <section>
-        <h1 className="mb-2 text-lg font-bold">Rakes & ships at your siding</h1>
+      <Section title="Shipments at your unloading point">
         {isLoading ? (
           <Loading />
         ) : !data?.items.length ? (
-          <Card>
-            <EmptyState icon={TruckIcon} title="No rake or ship right now">The office adds each rake when the RR is received.</EmptyState>
-          </Card>
+          <EmptyState icon={Train} title="No shipment right now">
+            The office adds each shipment when its paper (RR) arrives.
+          </EmptyState>
         ) : (
-          <div className="space-y-3">
+          <div className="grid gap-5 xl:grid-cols-2">
             {data.items.map((c) => (
-              <div key={c._id}>
+              <div key={c._id} className="flex flex-col gap-3">
                 <DemurrageClock consignment={c} />
-                <div className="mt-2 flex gap-2">
-                  {c.status === 'expected' && (
-                    <Button variant="secondary" className="flex-1" onClick={() => setConfirm({ id: c._id, action: 'place', ref: c.referenceNo })}>
-                      Rake has arrived — start clock
-                    </Button>
-                  )}
-                  {c.status === 'placed' && (
-                    <Button variant="secondary" className="flex-1" onClick={() => setConfirm({ id: c._id, action: 'release', ref: c.referenceNo })}>
-                      Rake empty — release
-                    </Button>
-                  )}
-                </div>
+                {c.status === 'expected' && (
+                  <Button size="lg" color="secondary" iconLeading={Play} onPress={() => setConfirm({ id: c._id, action: 'place', ref: c.referenceNo })}>
+                    Train has arrived — start timer
+                  </Button>
+                )}
+                {c.status === 'placed' && (
+                  <Button size="lg" color="secondary" iconLeading={Package} onPress={() => setConfirm({ id: c._id, action: 'release', ref: c.referenceNo })}>
+                    All unloaded — finish
+                  </Button>
+                )}
               </div>
             ))}
           </div>
         )}
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-lg font-bold">Trucks loaded today</h2>
-        <Card>
-          {!trips?.items.length ? (
-            <EmptyState title="No trucks yet today" />
-          ) : (
-            <ul className="divide-y divide-ink-100">
-              {trips.items.map((t) => (
-                <li key={t._id} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="font-semibold">{formatVehicleNo(t.vehicleNo)}</p>
-                    <p className="truncate text-sm text-ink-500">
-                      {formatTime(t.loading?.at)} · {formatQty(t.loading?.qty, t.unit)} → {t.destination?.name}
-                    </p>
-                  </div>
-                  <TripStatusBadge status={t.status} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-        <p className="mt-2 text-xs text-ink-500">Logged in as {user.name}.</p>
-      </section>
+      <DataTable
+        title="Trucks loaded today"
+        badge={<span className="text-sm text-tertiary">{trips?.items.length ?? 0}</span>}
+        dense
+        rows={trips?.items}
+        empty="No trucks yet today."
+        emptyIcon={Truck01}
+        columns={[
+          { key: 'truck', header: 'Truck', render: (t) => <span className="font-medium text-primary">{formatVehicleNo(t.vehicleNo)}</span> },
+          { key: 'time', header: 'Left at', render: (t) => formatTime(t.loading?.at) },
+          { key: 'qty', header: 'Loaded', align: 'right', render: (t) => formatQty(t.loading?.qty, t.unit) },
+          { key: 'to', header: 'Going to', render: (t) => t.destination?.name },
+          { key: 'status', header: 'Status', render: (t) => <TripStatusBadge status={t.status} /> },
+        ]}
+      />
 
       <ConfirmDialog
         open={Boolean(confirm)}
         onClose={() => setConfirm(null)}
         loading={act.isPending}
-        title={confirm?.action === 'place' ? 'Start the free-time clock?' : 'Release this rake?'}
+        icon={confirm?.action === 'place' ? Play : Package}
+        title={confirm?.action === 'place' ? 'Start the free-hours timer?' : 'Finish this shipment?'}
         message={
           confirm?.action === 'place'
-            ? `Do this only when rake ${confirm?.ref} is placed at the siding. The time now is saved.`
-            : `Do this only when rake ${confirm?.ref} is fully empty. No more trucks can load from it.`
+            ? `Do this only when shipment ${confirm?.ref} has arrived at the unloading point. The time now is saved.`
+            : `Do this only when shipment ${confirm?.ref} is fully empty. No more trucks can load from it.`
         }
         confirmLabel="Yes, confirm"
         onConfirm={() => act.mutate(confirm)}
       />
-    </div>
+    </>
   );
 }

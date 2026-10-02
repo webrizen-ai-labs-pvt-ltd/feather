@@ -9,6 +9,7 @@ import ConsignmentsPage from '@/pages/ConsignmentsPage.jsx';
 import CustomerDetailPage from '@/pages/CustomerDetailPage.jsx';
 import CustomersPage from '@/pages/CustomersPage.jsx';
 import DashboardPage from '@/pages/DashboardPage.jsx';
+import HelpPage from '@/pages/HelpPage.jsx';
 import LoginPage from '@/pages/LoginPage.jsx';
 import MastersPage from '@/pages/MastersPage.jsx';
 import SettingsPage from '@/pages/SettingsPage.jsx';
@@ -30,19 +31,20 @@ export default function App() {
         }
       >
         <Route index element={<DashboardPage />} />
-        <Route path="consignments" element={<ConsignmentsPage />} />
-        <Route path="consignments/:id" element={<ConsignmentDetailPage />} />
+        <Route path="shipments" element={<ConsignmentsPage />} />
+        <Route path="shipments/:id" element={<ConsignmentDetailPage />} />
         <Route path="trips" element={<TripsPage />} />
         <Route path="trips/:id" element={<TripDetailPage />} />
         <Route path="customers" element={<CustomersPage />} />
         <Route path="customers/:id" element={<CustomerDetailPage />} />
-        <Route path="transporters" element={<TransportersPage />} />
-        <Route path="stock" element={<StockPage />} />
-        <Route path="masters" element={<MastersPage />} />
-        <Route path="users" element={<UsersPage />} />
+        <Route path="truck-companies" element={<TransportersPage />} />
+        <Route path="inventory" element={<StockPage />} />
+        <Route path="setup" element={<MastersPage />} />
+        <Route path="staff" element={<UsersPage />} />
         <Route path="alerts" element={<AlertsPage />} />
-        <Route path="audit" element={<AuditPage />} />
+        <Route path="history" element={<AuditPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="help" element={<HelpPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

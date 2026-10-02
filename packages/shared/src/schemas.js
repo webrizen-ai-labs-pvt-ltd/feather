@@ -68,7 +68,7 @@ export const materialSchema = z.object({
   bagWeightKg: optional(positive('Bag weight')),
   transitLossTolerancePct: optional(nonNegative('Tolerance')),
   densityTPerM3: optional(positive('Density')),
-  landedCostPerUnit: optional(nonNegative('Landed cost')),
+  landedCostPerUnit: optional(nonNegative('Your cost')),
   active: z.boolean().default(true),
 });
 
@@ -87,10 +87,10 @@ export const locationSchema = z
   });
 
 export const transporterSchema = z.object({
-  name: z.string().trim().min(2, 'Enter transporter name'),
+  name: z.string().trim().min(2, 'Enter truck company name'),
   phone: optional(phoneSchema),
   gstin: optional(z.string().trim().toUpperCase()),
-  defaultRatePerUnit: optional(nonNegative('Freight rate')),
+  defaultRatePerUnit: optional(nonNegative('Truck rate')),
   active: z.boolean().default(true),
 });
 
@@ -107,16 +107,16 @@ export const customerSchema = z.object({
 // ---------- Consignments ----------
 export const consignmentSchema = z.object({
   mode: z.enum(Object.values(CONSIGNMENT_MODES)),
-  referenceNo: z.string().trim().min(3, 'Enter RR / Bill of Lading number'),
+  referenceNo: z.string().trim().min(3, 'Enter the shipment paper number'),
   supplier: z.string().trim().min(2, 'Enter supplier'),
   material: objectId,
   location: objectId,
-  declaredQty: positive('Quantity on RR / BL'),
+  declaredQty: positive('Quantity on Paper no.'),
   wagonCount: optional(wholeCount('Wagon count')),
-  freeTimeHours: positive('Free time hours'),
-  demurrageRatePerWagonHour: optional(nonNegative('Demurrage rate')),
+  freeTimeHours: positive('Free hours'),
+  demurrageRatePerWagonHour: optional(nonNegative('Late fee rate')),
   purchaseRatePerUnit: optional(nonNegative('Purchase rate')),
-  freightRatePerUnit: optional(nonNegative('Freight rate')),
+  freightRatePerUnit: optional(nonNegative('Truck rate')),
   expectedAt: optional(z.coerce.date()),
   notes: optional(z.string().trim()),
 });
@@ -145,7 +145,7 @@ export const loadingSchema = z
     driverName: z.string().trim().min(2, 'Enter driver name'),
     driverPhone: phoneSchema,
     transporter: objectId,
-    grossWeight: positive('Gross weight'),
+    grossWeight: positive('Full truck weight'),
     tareWeight: positive('Empty truck weight'),
     loadedBags: optional(wholeCount('Bags loaded')),
     slipNo: optional(z.string().trim()),
@@ -154,16 +154,16 @@ export const loadingSchema = z
   })
   .refine((v) => Boolean(v.consignment) !== Boolean(v.sourceLocation), {
     path: ['consignment'],
-    message: 'Choose a rake / ship, or a stockyard — not both',
+    message: 'Choose a shipment, or a warehouse — not both',
   })
   .refine((v) => v.grossWeight > v.tareWeight, {
     path: ['grossWeight'],
-    message: 'Gross weight must be more than empty truck weight',
+    message: 'Full truck weight must be more than empty truck weight',
   });
 
 export const receiptSchema = z
   .object({
-    grossWeight: positive('Gross weight'),
+    grossWeight: positive('Full truck weight'),
     tareWeight: positive('Empty truck weight'),
     slipNo: optional(z.string().trim()),
     sound: optional(wholeCount('Good bags')),
@@ -176,7 +176,7 @@ export const receiptSchema = z
   })
   .refine((v) => v.grossWeight > v.tareWeight, {
     path: ['grossWeight'],
-    message: 'Gross weight must be more than empty truck weight',
+    message: 'Full truck weight must be more than empty truck weight',
   })
   .refine((v) => !(v.underweight > 0) || v.underweightAvgKg, {
     path: ['underweightAvgKg'],
@@ -194,10 +194,10 @@ export const reasonSchema = z.object({ reason: z.string().trim().min(5, 'Write a
 
 export const tripCorrectionSchema = z.object({
   reason: z.string().trim().min(5, 'Write a short reason'),
-  loadingGross: optional(positive('Loading gross')),
-  loadingTare: optional(positive('Loading tare')),
-  receiptGross: optional(positive('Receipt gross')),
-  receiptTare: optional(positive('Receipt tare')),
+  loadingGross: optional(positive('Full weight at loading')),
+  loadingTare: optional(positive('Empty weight at loading')),
+  receiptGross: optional(positive('Full weight at receiving')),
+  receiptTare: optional(positive('Empty weight at receiving')),
 });
 
 export const advanceSchema = z.object({ advance: nonNegative('Advance') });
@@ -245,8 +245,8 @@ export const settingsSchema = z.object({
   defaultCreditDays: wholeCount('Credit days'),
   defaultExpectedTransitHours: positive('Transit hours'),
   slowTransitFactor: positive('Slow factor'),
-  tareDeviationPct: nonNegative('Tare deviation'),
-  tareMismatchTons: nonNegative('Tare mismatch'),
+  tareDeviationPct: nonNegative('Empty weight deviation'),
+  tareMismatchTons: nonNegative('Empty weight mismatch'),
   burstDiscountPct: nonNegative('Burst discount'),
   chargeBurstLossToTransporter: z.boolean(),
   demurrageWarnHours: nonNegative('Warn hours'),

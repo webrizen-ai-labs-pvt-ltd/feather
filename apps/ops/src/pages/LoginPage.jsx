@@ -1,7 +1,9 @@
+import { ArrowLeft, HelpCircle, LogIn01, Mail01, Phone01 } from '@untitledui/icons';
 import { useState } from 'react';
+import { Form, Link as AriaLink } from 'react-aria-components';
 import { Navigate } from 'react-router';
 import { COMPANY_NAME } from '@feather/shared';
-import { Button, Card, ErrorNote, Logo, Tabs, TextField, useAuth } from '@feather/ui';
+import { Button, ErrorNote, FeaturedIcon, Logo, Tabs, TextField, useAuth } from '@feather/ui';
 
 function PinLogin() {
   const { api, login } = useAuth();
@@ -24,23 +26,15 @@ function PinLogin() {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <TextField label="Mobile number" big inputMode="tel" autoComplete="tel" placeholder="98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} required />
-      <TextField
-        label="PIN"
-        big
-        type="password"
-        inputMode="numeric"
-        autoComplete="current-password"
-        maxLength={6}
-        value={pin}
-        onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-        required
-      />
+    <Form onSubmit={submit} className="flex flex-col gap-5">
+      <TextField label="Mobile number" big inputMode="tel" autoComplete="tel" prefix="+91" placeholder="98765 43210" value={phone} onChange={setPhone} required />
+      <TextField label="PIN" big type="password" inputMode="numeric" autoComplete="current-password" maxLength={6} value={pin} onChange={(v) => setPin(v.replace(/\D/g, ''))} required />
       <ErrorNote error={error} />
-      <Button type="submit" size="xl" loading={busy}>Log in</Button>
-      <p className="text-center text-sm text-ink-500">Forgot PIN? Ask the owner to set a new one.</p>
-    </form>
+      <Button type="submit" size="xl" className="w-full" iconLeading={LogIn01} isLoading={busy}>
+        Log in
+      </Button>
+      <p className="text-center text-sm text-tertiary">Forgot PIN? Ask the owner to set a new one.</p>
+    </Form>
   );
 }
 
@@ -71,31 +65,19 @@ function EmailLogin() {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <TextField label="Office email" big type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={sent} required />
-      {sent && (
-        <TextField
-          label="6 digit code from email"
-          big
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          maxLength={6}
-          autoFocus
-          value={code}
-          onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-          required
-        />
-      )}
+    <Form onSubmit={submit} className="flex flex-col gap-5">
+      <TextField label="Office email" big type="email" autoComplete="email" value={email} onChange={setEmail} isDisabled={sent} required />
+      {sent && <TextField label="6 digit code from email" big inputMode="numeric" autoComplete="one-time-code" maxLength={6} autoFocus value={code} onChange={(v) => setCode(v.replace(/\D/g, ''))} required />}
       <ErrorNote error={error} />
-      <Button type="submit" size="xl" loading={busy} disabled={sent && code.length !== 6}>
+      <Button type="submit" size="xl" className="w-full" iconLeading={sent ? LogIn01 : Mail01} isLoading={busy} isDisabled={sent && code.length !== 6}>
         {sent ? 'Log in' : 'Send code'}
       </Button>
       {sent && (
-        <button type="button" className="w-full text-sm font-medium text-ink-500" onClick={() => (setSent(false), setCode(''))}>
+        <Button color="link-gray" iconLeading={ArrowLeft} onPress={() => (setSent(false), setCode(''))}>
           Change email
-        </button>
+        </Button>
       )}
-    </form>
+    </Form>
   );
 }
 
@@ -103,19 +85,25 @@ export default function LoginPage() {
   const { user } = useAuth();
   if (user) return <Navigate to="/" replace />;
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center bg-ink-900 px-4 py-8">
-      <Card className="w-full max-w-md p-5 sm:p-7">
-        <Logo className="h-10" nameClassName="text-2xl" />
-        <p className="mt-1 text-sm text-ink-500">Operations</p>
+    <div className="flex min-h-dvh flex-col bg-primary px-4 py-6 sm:px-8">
+      <Logo className="h-9" nameClassName="text-lg" subtitle="Operations" />
+      <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-10">
+        <FeaturedIcon icon={Phone01} color="gray" theme="modern" size="xl" />
+        <h1 className="mt-6 text-display-xs font-semibold text-primary">Log in to Feather</h1>
+        <p className="mt-2 text-md text-tertiary">Field staff use their mobile number and PIN. Office staff get a code by email.</p>
         <Tabs
-          className="mt-5"
+          className="mt-8"
+          type="button-gray"
           tabs={[
             { label: 'Field staff (PIN)', content: <PinLogin /> },
             { label: 'Office (email)', content: <EmailLogin /> },
           ]}
         />
-      </Card>
-      <p className="mt-6 text-xs text-ink-400">{COMPANY_NAME}</p>
+        <AriaLink href="/help#login" className="mt-8 inline-flex items-center justify-center gap-1.5 text-sm font-semibold text-tertiary outline-focus-ring hover:text-secondary">
+          <HelpCircle className="size-4" aria-hidden /> Need help logging in?
+        </AriaLink>
+      </div>
+      <p className="text-center text-sm text-tertiary">© {COMPANY_NAME}</p>
     </div>
   );
 }

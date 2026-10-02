@@ -11,6 +11,7 @@ import NewDispatchPage from '@/pages/dispatch/NewDispatchPage.jsx';
 import OrdersPage from '@/pages/dispatch/OrdersPage.jsx';
 import LoadingHomePage from '@/pages/loading/LoadingHomePage.jsx';
 import NewLoadingPage from '@/pages/loading/NewLoadingPage.jsx';
+import HelpPage from '@/pages/HelpPage.jsx';
 import LoginPage from '@/pages/LoginPage.jsx';
 import OutboxPage from '@/pages/OutboxPage.jsx';
 
@@ -30,6 +31,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/help" element={<HelpPage />} />
       <Route
         element={
           <RequireRole roles={OPS_APP_ROLES} fallback="/login">

@@ -1,8 +1,16 @@
-import { ArrowDownTrayIcon, PencilSquareIcon, PlusIcon } from '@heroicons/react/24/outline';
+import { Building07, Download01, Edit03, Plus } from '@untitledui/icons';
 import { useState } from 'react';
 import { formatINR, formatLakh, formatNumber, formatPct } from '@feather/shared';
-import { Button, Card, CardHeader, DataTable, Loading, Meter, Modal, NumberField, PageHeader, SelectField, SwitchField, TextField, useApi, useForm } from '@feather/ui';
+import { Avatar, Button, DataTable, Loading, Meter, Modal, NumberField, PageHeader, Segmented, StatusBadge, SwitchField, TextField, useApi, useForm } from '@feather/ui';
 import { useAction, useGet } from '@/lib/hooks.js';
+
+const initials = (n = '') => n.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+const PERIODS = [
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: '180', label: '6 months' },
+  { value: '365', label: '1 year' },
+];
 
 export default function TransportersPage() {
   const [days, setDays] = useState('30');
@@ -10,71 +18,97 @@ export default function TransportersPage() {
   const { data: board, isLoading } = useGet('/admin/scorecard', { days });
   const { data: list } = useGet('/masters/transporters', { active: 'all' });
   const api = useApi();
-  const scorecard = board?.items ?? [];
 
   return (
     <>
       <PageHeader
-        title="Transporters"
-        subtitle="Who loses material, who damages bags, and how much was deducted."
+        help="owner-transporters"
+        title="Truck companies"
+        subtitle="Who loses material, who damages bags, and how much was cut from their payment."
         actions={
           <>
-            <div className="w-40">
-              <SelectField value={days} onChange={setDays} options={[['30', 'Last 30 days'], ['90', 'Last 90 days'], ['180', 'Last 6 months'], ['365', 'Last 1 year']].map(([value, label]) => ({ value, label }))} />
-            </div>
-            <Button variant="secondary" icon={ArrowDownTrayIcon} onClick={() => api.download('/exports/transporters.xlsx', { days })}>
+            <Button color="secondary" iconLeading={Download01} onPress={() => api.download('/exports/transporters.xlsx', { days })}>
               Scorecard Excel
             </Button>
-            <Button icon={PlusIcon} onClick={() => setEditing({})}>New transporter</Button>
+            <Button iconLeading={Plus} onPress={() => setEditing({})}>
+              New truck company
+            </Button>
           </>
         }
       />
-      <Card className="mb-6">
-        <CardHeader title={`Scorecard — last ${days} days`} subtitle="Problem trips = freight was locked for loss, damage, shortage or weight mismatch." />
-        {isLoading ? (
-          <Loading />
-        ) : (
-          <DataTable
-            rows={scorecard}
-            rowKey={(r) => r.transporter._id}
-            empty="No received trucks in this period."
-            columns={[
-              { key: 'name', header: 'Transporter', render: (r) => <span className="font-medium">{r.transporter.name}</span> },
-              { key: 'trips', header: 'Trips', align: 'right' },
-              { key: 'loaded', header: 'Loaded', align: 'right', render: (r) => `${formatNumber(r.loadedTons, 1)} MT` },
-              { key: 'lost', header: 'Lost', align: 'right', render: (r) => `${formatNumber(r.lossTons, 2)} MT` },
-              { key: 'lossPct', header: 'Loss %', align: 'right', render: (r) => formatPct(r.lossPct) },
-              { key: 'bags', header: 'Bags damaged / missing', align: 'right', render: (r) => (r.billedBags ? `${r.damagedBags} / ${r.missingBags} (${formatPct(r.bagDamagePct)})` : '—') },
-              {
-                key: 'problem',
-                header: 'Problem trips',
-                render: (r) => (
-                  <div className="flex min-w-36 items-center gap-2">
-                    <Meter value={r.problemRatePct} max={100} tone={r.problemRatePct > 20 ? 'bad' : r.problemRatePct > 5 ? 'warn' : 'good'} />
-                    <span className="w-16 text-right">{r.lockedTrips} ({formatPct(r.problemRatePct, 0)})</span>
-                  </div>
-                ),
-              },
-              { key: 'ded', header: 'Deducted', align: 'right', render: (r) => formatLakh(r.deductions) },
-            ]}
-          />
-        )}
-      </Card>
-      <Card>
-        <CardHeader title="All transporters" />
+
+      <div className="mb-5">
+        <Segmented options={PERIODS} value={days} onChange={setDays} />
+      </div>
+
+      {isLoading ? (
+        <Loading />
+      ) : (
         <DataTable
-          dense
-          rows={list?.items}
+          className="mb-8"
+          title={`Scorecard — last ${PERIODS.find((p) => p.value === days)?.label}`}
+          subtitle="Worst first. A problem trip = truck payment was put on hold for loss, damage, shortage or weight mismatch."
+          rows={board?.items}
+          rowKey={(r) => r.transporter._id}
+          empty="No received trucks in this period."
+          emptyIcon={Building07}
           columns={[
-            { key: 'name', header: 'Name', render: (t) => <span className="font-medium">{t.name}</span> },
-            { key: 'phone', header: 'Phone' },
-            { key: 'gstin', header: 'GSTIN' },
-            { key: 'rate', header: 'Usual rate', align: 'right', render: (t) => formatINR(t.defaultRatePerUnit) },
-            { key: 'active', header: 'Active', render: (t) => (t.active ? 'Yes' : 'No') },
-            { key: 'edit', header: '', render: (t) => <Button size="sm" variant="ghost" icon={PencilSquareIcon} onClick={() => setEditing(t)}>Edit</Button> },
+            {
+              key: 'name',
+              header: 'Truck company',
+              render: (r) => (
+                <div className="flex items-center gap-3">
+                  <Avatar size="sm" initials={initials(r.transporter.name)} />
+                  <span className="font-medium text-primary">{r.transporter.name}</span>
+                </div>
+              ),
+            },
+            { key: 'trips', header: 'Trips', align: 'right', sortable: true },
+            { key: 'loadedTons', header: 'Loaded', align: 'right', sortable: true, render: (r) => `${formatNumber(r.loadedTons, 1)} MT` },
+            { key: 'lossTons', header: 'Lost', align: 'right', sortable: true, render: (r) => `${formatNumber(r.lossTons, 2)} MT` },
+            { key: 'lossPct', header: 'Loss %', align: 'right', sortable: true, render: (r) => formatPct(r.lossPct) },
+            { key: 'bags', header: 'Bags damaged / missing', align: 'right', render: (r) => (r.billedBags ? `${r.damagedBags} / ${r.missingBags} (${formatPct(r.bagDamagePct)})` : '—') },
+            {
+              key: 'problemRatePct',
+              header: 'Problem trips',
+              sortable: true,
+              render: (r) => (
+                <div className="flex min-w-40 items-center gap-3">
+                  <Meter value={r.problemRatePct} max={100} tone={r.problemRatePct > 20 ? 'bad' : r.problemRatePct > 5 ? 'warn' : 'good'} />
+                  <span className="w-16 text-right text-sm font-medium text-secondary">
+                    {r.lockedTrips} ({formatPct(r.problemRatePct, 0)})
+                  </span>
+                </div>
+              ),
+            },
+            { key: 'deductions', header: 'Cut', align: 'right', sortable: true, render: (r) => formatLakh(r.deductions) },
           ]}
         />
-      </Card>
+      )}
+
+      <DataTable
+        title="All truck companies"
+        dense
+        rows={list?.items}
+        empty="No truck companies yet."
+        columns={[
+          { key: 'name', header: 'Name', sortable: true, render: (t) => <span className="font-medium text-primary">{t.name}</span> },
+          { key: 'phone', header: 'Phone', render: (t) => t.phone ?? '—' },
+          { key: 'gstin', header: 'GSTIN', render: (t) => t.gstin ?? '—' },
+          { key: 'rate', header: 'Usual rate', align: 'right', render: (t) => formatINR(t.defaultRatePerUnit) },
+          { key: 'active', header: 'Status', render: (t) => <StatusBadge tone={t.active ? 'good' : 'neutral'}>{t.active ? 'Active' : 'Off'}</StatusBadge> },
+          {
+            key: 'edit',
+            header: '',
+            align: 'right',
+            render: (t) => (
+              <Button size="sm" color="tertiary" iconLeading={Edit03} onPress={() => setEditing(t)}>
+                Edit
+              </Button>
+            ),
+          },
+        ]}
+      />
       {editing && <TransporterForm existing={editing._id ? editing : null} onClose={() => setEditing(null)} />}
     </>
   );
@@ -99,19 +133,24 @@ function TransporterForm({ existing, onClose }) {
     <Modal
       open
       onClose={onClose}
-      title={existing ? 'Edit transporter' : 'New transporter'}
+      icon={Building07}
+      title={existing ? 'Edit truck company' : 'New truck company'}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button loading={save.isPending} onClick={() => save.mutate(v)}>Save</Button>
+          <Button color="secondary" onPress={onClose}>
+            Cancel
+          </Button>
+          <Button isLoading={save.isPending} onPress={() => save.mutate(v)}>
+            Save
+          </Button>
         </>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-2">
         <TextField className="sm:col-span-2" label="Name" value={v.name} onChange={f.set('name')} error={f.errors.name} required />
         <TextField label="Phone" value={v.phone} onChange={f.set('phone')} error={f.errors.phone} />
         <TextField label="GSTIN" value={v.gstin} onChange={f.set('gstin')} />
-        <NumberField label="Usual freight rate" suffix="₹ / unit" value={v.defaultRatePerUnit} onChange={f.set('defaultRatePerUnit')} />
+        <NumberField label="Usual truck rate" prefix="₹" suffix="per unit" value={v.defaultRatePerUnit} onChange={f.set('defaultRatePerUnit')} />
         <SwitchField label="Active" checked={v.active} onChange={f.set('active')} />
       </div>
     </Modal>

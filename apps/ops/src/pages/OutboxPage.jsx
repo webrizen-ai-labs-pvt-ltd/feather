@@ -1,7 +1,7 @@
-import { ArrowPathIcon, CheckCircleIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { CheckCircle, Inbox01, RefreshCw01, Trash01 } from '@untitledui/icons';
 import { useState } from 'react';
 import { formatDateTime } from '@feather/shared';
-import { Badge, Button, Card, ConfirmDialog, EmptyState, useOnline } from '@feather/ui';
+import { Button, Card, ConfirmDialog, EmptyState, PageHeader, StatusBadge, useOnline } from '@feather/ui';
 import { useOutbox } from '@/lib/outbox.jsx';
 
 export default function OutboxPage() {
@@ -10,35 +10,47 @@ export default function OutboxPage() {
   const [deleting, setDeleting] = useState(null);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold">Saved on this phone</h1>
-          <p className="text-sm text-ink-500">Entries made without network. They are sent automatically.</p>
-        </div>
-        <Button variant="secondary" icon={ArrowPathIcon} disabled={!online || !items.length} onClick={flush}>Send now</Button>
-      </div>
+    <div className="mx-auto max-w-2xl">
+      <PageHeader
+        help="offline"
+        title="Saved on this phone"
+        subtitle="Entries made without network. They are sent by themselves when the signal is back."
+        actions={
+          <Button color="secondary" iconLeading={RefreshCw01} isDisabled={!online || !items.length} onPress={flush}>
+            Send now
+          </Button>
+        }
+      />
       <Card>
         {!items.length ? (
-          <EmptyState icon={CheckCircleIcon} title="Nothing waiting">Everything has reached the office.</EmptyState>
+          <EmptyState icon={CheckCircle} title="Nothing waiting">
+            Everything has reached the office.
+          </EmptyState>
         ) : (
-          <ul className="divide-y divide-ink-100">
+          <ul className="divide-y divide-secondary">
             {items.map((i) => (
-              <li key={i.id} className="px-4 py-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-semibold">{i.label}</p>
-                    <p className="text-xs text-ink-500">Saved {formatDateTime(i.createdAt)}</p>
-                    {i.error && <p className="mt-1 text-sm text-red-700">{i.error}</p>}
+              <li key={i.id} className="flex gap-4 px-5 py-4">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-fg-quaternary">
+                  <Inbox01 className="size-5" aria-hidden />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-primary">{i.label}</p>
+                    {i.status === 'failed' ? <StatusBadge tone="bad">Not accepted</StatusBadge> : <StatusBadge tone="warn">Waiting</StatusBadge>}
                   </div>
-                  {i.status === 'failed' ? <Badge tone="bad">Not accepted</Badge> : <Badge tone="warn">Waiting</Badge>}
+                  <p className="text-xs text-tertiary">Saved {formatDateTime(i.createdAt)}</p>
+                  {i.error && <p className="mt-1 text-sm text-error-primary">{i.error}</p>}
+                  {i.status === 'failed' && (
+                    <div className="mt-3 flex gap-2">
+                      <Button size="sm" color="secondary" iconLeading={RefreshCw01} onPress={() => retry(i.id)}>
+                        Try again
+                      </Button>
+                      <Button size="sm" color="tertiary-destructive" iconLeading={Trash01} onPress={() => setDeleting(i)}>
+                        Delete
+                      </Button>
+                    </div>
+                  )}
                 </div>
-                {i.status === 'failed' && (
-                  <div className="mt-2 flex gap-2">
-                    <Button size="sm" variant="secondary" onClick={() => retry(i.id)}>Try again</Button>
-                    <Button size="sm" variant="ghost" icon={TrashIcon} onClick={() => setDeleting(i)}>Delete</Button>
-                  </div>
-                )}
               </li>
             ))}
           </ul>
