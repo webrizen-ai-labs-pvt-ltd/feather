@@ -40,7 +40,7 @@ router.get('/orders', requireRole(OWNER, DISPATCH_OPERATOR, ROLES.SIDING_SUPERVI
     .sort({ createdAt: -1 })
     .limit(300)
     .populate('customer', 'name')
-    .populate('material', 'name unit')
+    .populate('material', 'name unit kind bagWeightKg')
     .populate('deliverySite', 'name')
     .lean();
   res.json({ items: orders.map((o) => presentOrder(o, req.user.role)) });

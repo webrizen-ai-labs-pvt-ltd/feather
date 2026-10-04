@@ -9,11 +9,17 @@ import {
   formatNumber,
   formatVehicleNo,
   loadingSchema,
+  LOCATION_TYPE_LABELS,
   LOCATION_TYPES,
   normalizeVehicleNo,
+  PRICE_REQUEST_KINDS,
+  routeFrom,
+  UNLOADING_POINT_TYPES,
+  WEIGH_METHOD_LABELS,
+  WEIGH_METHODS,
 } from '@feather/shared';
 import { Alert, Button, ErrorNote, NumberField, PhotoCapture, SelectField, TextField, newId, toOptions, useApi, useAuth, useForm } from '@feather/ui';
-import { FormStep, Readout, SavedScreen } from '@/components/FieldKit.jsx';
+import { FormStep, RateRequest, Readout, SavedScreen } from '@/components/FieldKit.jsx';
 import { useCachedGet } from '@/lib/cached.js';
 import { useOutbox } from '@/lib/outbox.jsx';
 
@@ -30,6 +36,11 @@ const EMPTY = {
   tareWeight: '',
   loadedBags: '',
   slipNo: '',
+  weighMethod: 'weight',
+  truckPrice: '',
+  truckPriceReason: '',
+  labourCost: '',
+  labourCostReason: '',
 };
 
 /**
@@ -45,6 +56,8 @@ export default function TruckLoadingForm({ source }) {
   const f = useForm(EMPTY);
   const v = f.values;
   const [photo, setPhoto] = useState(null);
+  // Which owner rates staff are asking to change: { truckPrice?: true, labourCost?: true }
+  const [asking, setAsking] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(null);
@@ -55,15 +68,60 @@ export default function TruckLoadingForm({ source }) {
   const { data: places } = useCachedGet('/masters/locations', { type: 'stockyard,customer_site' });
   const { data: transporters } = useCachedGet('/masters/transporters');
   const { data: orders } = useCachedGet('/sales/orders', { status: 'open' });
+  const { data: stations } = useCachedGet(fromRake ? '/masters/locations' : null, { type: UNLOADING_POINT_TYPES.join(',') });
 
   const rake = rakes?.items.find((c) => c._id === v.consignment);
   const destination = places?.items.find((l) => l._id === v.destination);
   const toCustomer = destination?.type === LOCATION_TYPES.CUSTOMER_SITE;
   const order = orders?.items.find((o) => o._id === v.order);
   const materialId = rake?.material?._id ?? order?.material?._id;
-  const isBagged = (rake?.material?.unit ?? order?.material?.unit) === 'bag';
+  const material = rake?.material ?? order?.material;
+  const isBagged = material?.unit === 'bag';
+  // Bag count only works for bagged material; until the material is known, offer both.
+  const knownBulk = Boolean(material) && !isBagged;
+  const method = knownBulk ? WEIGH_METHODS.WEIGHT : v.weighMethod;
+  const byBags = method === WEIGH_METHODS.BAGS;
+  const bagWeightKg = material?.bagWeightKg ?? 50;
+  const methodOptions = Object.entries(WEIGH_METHOD_LABELS)
+    .filter(([value]) => !(knownBulk && value === WEIGH_METHODS.BAGS))
+    .map(([value, label]) => ({ value, label, hint: value === WEIGH_METHODS.BAGS ? 'Cement in bags' : 'From the weighbridge slip' }));
   const siteOrders = (orders?.items ?? []).filter((o) => (o.deliverySite?._id ?? o.deliverySite) === v.destination && (!materialId || !rake || (o.material?._id ?? o.material) === materialId));
-  const net = Number(v.grossWeight) > Number(v.tareWeight) && Number(v.tareWeight) > 0 ? Number(v.grossWeight) - Number(v.tareWeight) : null;
+  const bags = Number(v.loadedBags);
+  const net = byBags
+    ? Number.isInteger(bags) && bags > 0
+      ? (bags * bagWeightKg) / 1000
+      : null
+    : Number(v.grossWeight) > Number(v.tareWeight) && Number(v.tareWeight) > 0
+      ? Number(v.grossWeight) - Number(v.tareWeight)
+      : null;
+  // Owner's price per truck for this shipment's unloading point → the chosen place (from the cached places list, so it works offline).
+  const route = fromRake ? routeFrom(destination, rake?.location?._id) : null;
+  const quoted = route?.pricePerTruck;
+  // Unloading labour at the shipment's station / port (also from the cached list).
+  const station = stations?.items.find((s) => s._id === rake?.location?._id);
+  const labourQuoted = station?.labourCostPerTruck;
+  const otherLabourRates = [
+    station?.labourCostPerWagon != null && `${formatINR(station.labourCostPerWagon)} per wagon`,
+    station?.labourCostPerKg != null && `₹${formatNumber(station.labourCostPerKg, 2)} per kg`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const quotes = { truckPrice: quoted, labourCost: labourQuoted };
+
+  /** Props for one RateRequest: its switch, new amount and reason, wired to the form. */
+  const rateProps = (kind) => ({
+    asking: Boolean(asking[kind]),
+    onAskingChange: (on) => {
+      setAsking((a) => ({ ...a, [kind]: on }));
+      f.setErrors((e) => ({ ...e, [kind]: undefined, [`${kind}Reason`]: undefined }));
+    },
+    value: v[kind],
+    onChange: f.set(kind),
+    error: f.errors[kind],
+    reason: v[`${kind}Reason`],
+    onReasonChange: f.set(`${kind}Reason`),
+    reasonError: f.errors[`${kind}Reason`],
+  });
 
   const destinationOptions = useMemo(
     () =>
@@ -94,12 +152,27 @@ export default function TruckLoadingForm({ source }) {
   async function onSubmit(e) {
     e.preventDefault();
     setError(null);
+    // Only shipment trucks carry owner rates; send a new amount + reason only where staff are asking.
+    const asked = Object.keys(PRICE_REQUEST_KINDS).filter((kind) => fromRake && asking[kind]);
+    const requestFields = Object.fromEntries(
+      Object.keys(PRICE_REQUEST_KINDS).flatMap((kind) => {
+        const on = asked.includes(kind);
+        return [
+          [kind, on ? v[kind] : undefined],
+          [`${kind}Reason`, on ? v[`${kind}Reason`] : undefined],
+        ];
+      }),
+    );
     const fields = {
       ...Object.fromEntries(Object.entries(v).filter(([, val]) => val !== '')),
       order: toCustomer ? v.order : undefined,
-      loadedBags: isBagged ? v.loadedBags : undefined,
+      loadedBags: isBagged || byBags ? v.loadedBags : undefined,
+      weighMethod: method,
+      grossWeight: byBags ? undefined : v.grossWeight || undefined,
+      tareWeight: byBags ? undefined : v.tareWeight || undefined,
       consignment: fromRake ? v.consignment : undefined,
       sourceLocation: fromRake ? undefined : v.sourceLocation,
+      ...requestFields,
       clientId: newId(),
       deviceTime: new Date().toISOString(),
     };
@@ -108,6 +181,11 @@ export default function TruckLoadingForm({ source }) {
     const errs = check.success ? {} : fieldErrors(check.error);
     if (toCustomer && !v.order) errs.order = 'Choose the customer order';
     if (isBagged && !v.loadedBags) errs.loadedBags = 'Enter number of bags';
+    for (const kind of asked) {
+      const name = PRICE_REQUEST_KINDS[kind].label.toLowerCase();
+      if (v[kind] === '') errs[kind] = `Enter the new ${name}`;
+      else if (Number(v[kind]) === quotes[kind]) errs[kind] = `This is the same as the owner's ${name}. Turn off the switch.`;
+    }
     if (!photo) errs.photo = 'Take a photo of the weighbridge slip';
     if (Object.keys(errs).length) {
       f.setErrors(errs);
@@ -117,7 +195,7 @@ export default function TruckLoadingForm({ source }) {
     setBusy(true);
     try {
       const res = await submit({ path: '/trips/loading', fields, photo, label: `Loading ${formatVehicleNo(fields.vehicleNo)}` });
-      setDone({ queued: res.queued, trip: res.data?.item, vehicleNo: fields.vehicleNo });
+      setDone({ queued: res.queued, trip: res.data?.item, vehicleNo: fields.vehicleNo, asked: asked.map((kind) => [kind, Number(v[kind])]) });
       qc.invalidateQueries();
     } catch (err) {
       if (err.fields) f.setErrors(err.fields);
@@ -128,9 +206,11 @@ export default function TruckLoadingForm({ source }) {
   }
 
   function reset() {
-    f.setValues((s) => ({ ...EMPTY, consignment: s.consignment, sourceLocation: s.sourceLocation, destination: s.destination, order: s.order }));
+    // Keep where it's going and how it's weighed — the next truck is usually the same.
+    f.setValues((s) => ({ ...EMPTY, consignment: s.consignment, sourceLocation: s.sourceLocation, destination: s.destination, order: s.order, weighMethod: s.weighMethod }));
     f.setErrors({});
     setPhoto(null);
+    setAsking({});
     setDone(null);
     setError(null);
     window.scrollTo({ top: 0 });
@@ -141,7 +221,11 @@ export default function TruckLoadingForm({ source }) {
       <SavedScreen
         queued={done.queued}
         title="Truck sent"
-        lines={[formatVehicleNo(done.vehicleNo), done.trip && `Trip ${done.trip.tripNo}${done.trip.challanNo ? ` · Delivery note ${done.trip.challanNo}` : ''}`].filter(Boolean)}
+        lines={[
+          formatVehicleNo(done.vehicleNo),
+          done.trip && `Trip ${done.trip.tripNo}${done.trip.challanNo ? ` · Delivery note ${done.trip.challanNo}` : ''}`,
+          ...done.asked.map(([kind, amount]) => `New ${PRICE_REQUEST_KINDS[kind].label.toLowerCase()} ${formatINR(amount)} sent to the owner for approval`),
+        ].filter(Boolean)}
         action={
           <Button size="xl" className="w-full" iconLeading={Truck01} onPress={reset}>
             Load next truck
@@ -193,16 +277,81 @@ export default function TruckLoadingForm({ source }) {
         <SelectField big required label="Truck company" value={v.transporter} onChange={f.set('transporter')} error={f.errors.transporter} options={toOptions(transporters?.items)} />
       </FormStep>
 
-      <FormStep n={3} title="Weighbridge slip" description="Type the numbers exactly as printed, then take a photo of the slip.">
-        <div className="grid grid-cols-2 gap-4">
-          <NumberField big required label="Full truck" suffix="T" value={v.grossWeight} onChange={f.set('grossWeight')} error={f.errors.grossWeight} />
-          <NumberField big required label="Empty truck" suffix="T" value={v.tareWeight} onChange={f.set('tareWeight')} error={f.errors.tareWeight} />
-        </div>
-        <Readout label="Material weight" value={net === null ? '—' : `${formatNumber(net, 3)} T`} />
-        {isBagged && <NumberField big required label="Bags loaded" inputMode="numeric" value={v.loadedBags} onChange={f.set('loadedBags')} error={f.errors.loadedBags} />}
-        <TextField label="Slip number" value={v.slipNo} onChange={f.set('slipNo')} />
-        <PhotoCapture value={photo} onChange={(p) => (setPhoto(p), f.setErrors((e) => ({ ...e, photo: undefined })))} error={f.errors.photo} />
+      <FormStep
+        n={3}
+        title="Weighbridge slip"
+        description={byBags ? 'Count the bags loaded on the truck, then take a photo of the loaded truck or bag challan.' : 'Type the numbers exactly as printed, then take a photo of the slip.'}
+      >
+        <SelectField
+          big
+          required
+          label="Calculation method"
+          hint={knownBulk ? 'This material is weighed. Bag count is only for cement in bags.' : 'How the material weight is worked out.'}
+          value={method}
+          onChange={f.set('weighMethod')}
+          error={f.errors.weighMethod}
+          options={methodOptions}
+        />
+        {byBags ? (
+          <NumberField big required label="Bags loaded" inputMode="numeric" value={v.loadedBags} onChange={f.set('loadedBags')} error={f.errors.loadedBags} />
+        ) : (
+          <div className="grid grid-cols-2 gap-4">
+            <NumberField big required label="Full truck" suffix="T" value={v.grossWeight} onChange={f.set('grossWeight')} error={f.errors.grossWeight} />
+            <NumberField big required label="Empty truck" suffix="T" value={v.tareWeight} onChange={f.set('tareWeight')} error={f.errors.tareWeight} />
+          </div>
+        )}
+        <Readout label={byBags ? `Material weight (${formatNumber(bagWeightKg, 0)} kg per bag)` : 'Material weight'} value={net === null ? '—' : `${formatNumber(net, 3)} T`} />
+        {isBagged && !byBags && <NumberField big required label="Bags loaded" inputMode="numeric" value={v.loadedBags} onChange={f.set('loadedBags')} error={f.errors.loadedBags} />}
+        <TextField label={byBags ? 'Challan / slip number' : 'Slip number'} value={v.slipNo} onChange={f.set('slipNo')} />
+        <PhotoCapture
+          label={byBags ? 'Photo of loaded truck or bag challan' : undefined}
+          value={photo}
+          onChange={(p) => (setPhoto(p), f.setErrors((e) => ({ ...e, photo: undefined })))}
+          error={f.errors.photo}
+        />
       </FormStep>
+
+      {fromRake && (
+        <FormStep n={4} title="Labour cost" description="Unloading labour for this truck, set by the owner for this station / port. You can ask for a different cost — the owner must approve it.">
+          {!rake ? (
+            <p className="text-sm text-tertiary">Choose the shipment to see the labour cost.</p>
+          ) : (
+            <RateRequest
+              {...rateProps('labourCost')}
+              label="Labour cost per truck"
+              quoted={labourQuoted}
+              details={[
+                `${rake.location?.name ?? 'Unloading point'}${station ? ` · ${LOCATION_TYPE_LABELS[station.type]}` : ''}`,
+                otherLabourRates,
+                labourQuoted == null && 'the owner has not set a per-truck labour cost here yet',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              askLabel="Ask for a different labour cost"
+              askHint="For example, extra labour was needed for wet or torn bags."
+              reasonPlaceholder="e.g. 2 extra labourers for torn bags"
+            />
+          )}
+        </FormStep>
+      )}
+
+      {fromRake && (
+        <FormStep n={5} title="Payment" description="Price per truck set by the owner for this route. You can ask for a different price — the owner must approve it.">
+          {!rake || !destination ? (
+            <p className="text-sm text-tertiary">Choose the shipment and where the truck is going to see the price.</p>
+          ) : (
+            <RateRequest
+              {...rateProps('truckPrice')}
+              label="Price per truck"
+              quoted={quoted}
+              details={`${rake.location?.name} → ${destination.name}${route?.distanceKm ? ` · ${formatNumber(route.distanceKm, 1)} km` : ''}${quoted == null ? ' · the owner has not set a price for this route yet' : ''}`}
+              askLabel="Ask for a different price"
+              askHint="For example, the truck company wants more because of a longer road."
+              reasonPlaceholder="e.g. main road closed, truck has to go the long way"
+            />
+          )}
+        </FormStep>
+      )}
 
       {blocked ? (
         <Alert tone="error" icon={SlashCircle01} title="Customer on hold — do not load this truck">

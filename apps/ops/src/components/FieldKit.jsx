@@ -1,6 +1,30 @@
 /** Small building blocks for the field-phone forms (numbered steps, success screen). */
 import { CheckCircle, CloudBlank01 } from '@untitledui/icons';
-import { Card, FeaturedIcon } from '@feather/ui';
+import { formatINR } from '@feather/shared';
+import { Alert, Card, FeaturedIcon, NumberField, SwitchField, TextAreaField } from '@feather/ui';
+
+/**
+ * An owner rate (price per truck, labour cost) with a switch to ask for a different amount.
+ * The new amount is only a request — the owner approves it.
+ */
+export function RateRequest({ label, quoted, details, asking, onAskingChange, value, onChange, error, reason, onReasonChange, reasonError, askLabel, askHint, reasonPlaceholder }) {
+  return (
+    <>
+      <Readout label={`${label} (set by owner)`} value={quoted != null ? formatINR(quoted) : 'Not set'} />
+      {details && <p className="-mt-2 text-center text-sm text-tertiary">{details}</p>}
+      <SwitchField label={askLabel} hint={askHint} checked={asking} onChange={onAskingChange} />
+      {asking && (
+        <>
+          <NumberField big required label={`New ${label.toLowerCase()}`} prefix="₹" value={value} onChange={onChange} error={error} />
+          <TextAreaField label="Why is it different?" placeholder={reasonPlaceholder} value={reason} onChange={onReasonChange} error={reasonError} isRequired />
+          <Alert tone="gray" title="The owner must approve this.">
+            The owner gets a notification. Until they approve it, the owner&apos;s amount is used.
+          </Alert>
+        </>
+      )}
+    </>
+  );
+}
 
 /** A numbered step of a form: "1  Where is it going?" */
 export function FormStep({ n, title, description, children }) {

@@ -4,6 +4,7 @@ import {
   Home02,
   Inbox01,
   LifeBuoy01,
+  Phone01,
   PlusCircle,
   Train,
   Truck01,
@@ -21,6 +22,7 @@ import { useOutbox } from '@/lib/outbox.jsx';
 const SECTIONS = [
   {
     label: 'Loading',
+    icon: Upload01,
     group: 'loading',
     items: [
       { label: 'Shipments', href: '/loading', icon: Train, end: true, keywords: 'train timer free hours' },
@@ -29,12 +31,14 @@ const SECTIONS = [
   },
   {
     label: 'Receiving',
+    icon: PackageCheck,
     group: 'gate',
     items: [{ label: 'Incoming trucks', href: '/gate', icon: PackageCheck, end: true, keywords: 'arrivals receive' }],
   },
-  { label: 'Receiving', group: 'stockCount', items: [{ label: 'Count stock', href: '/gate/count', icon: Archive, keywords: 'stock count warehouse' }] },
+  { label: 'Receiving', icon: PackageCheck, group: 'stockCount', items: [{ label: 'Count stock', href: '/gate/count', icon: Archive, keywords: 'stock count warehouse' }] },
   {
     label: 'Dispatch',
+    icon: Truck01,
     group: 'dispatch',
     items: [
       { label: 'Today', href: '/dispatch', icon: Home02, end: true, keywords: 'board late breakdown' },
@@ -72,10 +76,11 @@ export default function Layout() {
   for (const s of SECTIONS.filter((s) => canAccess(s.group, user.role))) {
     const same = merged.find((m) => m.label === s.label);
     if (same) same.items.push(...s.items);
-    else merged.push({ label: s.label, items: [...s.items] });
+    else merged.push({ label: s.label, icon: s.icon, items: [...s.items] });
   }
   merged.push({
     label: 'Phone',
+    icon: Phone01,
     items: [
       { label: 'Saved on this phone', href: '/outbox', icon: Inbox01, badge: pending || undefined, keywords: 'offline outbox' },
       { label: 'Help & guide', href: '/help', icon: LifeBuoy01, keywords: 'manual how to' },

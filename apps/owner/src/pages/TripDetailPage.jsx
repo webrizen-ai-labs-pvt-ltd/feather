@@ -1,7 +1,7 @@
-import { AlertTriangle, BankNote01, CheckCircle, Edit03, MarkerPin01, Phone, Scales02, Truck01, XCircle } from '@untitledui/icons';
+import { AlertTriangle, BankNote01, CheckCircle, CurrencyRupeeCircle, Edit03, MarkerPin01, Phone, Scales02, Truck01, Users01, XCircle } from '@untitledui/icons';
 import { useState } from 'react';
 import { useParams } from 'react-router';
-import { formatDateTime, formatHours, formatINR, formatNumber, formatPct, formatQty, formatVehicleNo, TRIP_FLAG_LABELS } from '@feather/shared';
+import { formatDateTime, formatHours, formatINR, formatNumber, formatPct, formatQty, formatVehicleNo, PRICE_REQUEST_KINDS, TRIP_FLAG_LABELS } from '@feather/shared';
 import {
   Alert,
   Button,
@@ -88,12 +88,29 @@ export default function TripDetailPage() {
   const waive = useAction((api, reason) => api.post(`/trips/${id}/freight/waive`, { reason }), done);
   const paid = useAction((api) => api.post(`/trips/${id}/freight/paid`, {}), done);
   const cancel = useAction((api, reason) => api.post(`/trips/${id}/cancel`, { reason }), done);
+  // New price per truck / labour cost asked by loading staff. vars = { kind, reason? }
+  const approveRate = useAction((api, { kind }) => api.post(`/trips/${id}/${PRICE_REQUEST_KINDS[kind].path}/approve`, {}), {
+    ...done,
+    success: (_d, { kind }) => (kind === 'truckPrice' ? 'New price approved. Truck payment updated.' : 'New labour cost approved'),
+  });
+  const rejectRate = useAction((api, { kind, reason }) => api.post(`/trips/${id}/${PRICE_REQUEST_KINDS[kind].path}/reject`, { reason }), { ...done, success: 'Kept your rate' });
+  const reviewProps = (kind) => ({
+    kind,
+    approving: approveRate.isPending && approveRate.variables?.kind === kind,
+    onApprove: () => approveRate.mutate({ kind }),
+    onReject: () => setDialog(`reject:${kind}`),
+  });
 
   if (isLoading) return <Loading />;
   const t = data.item;
   const bagged = t.unit === 'bag';
   const b = t.receipt?.bags;
   const fr = t.freight ?? {};
+  const tp = t.truckPrice;
+  const lc = t.labourCost;
+  const pricePending = tp?.status === 'pending';
+  const rejecting = dialog?.startsWith('reject:') ? dialog.slice(7) : null;
+  const rejectingReq = rejecting && t[rejecting];
   const track = truckTracking(t);
   const problems = (t.flags ?? []).filter((f) => !['offline_entry', 'credit_override'].includes(f));
 
@@ -141,7 +158,10 @@ export default function TripDetailPage() {
                 title="When it left"
                 place={t.sourceLocation?.name}
                 side={t.loading}
-                extra={[bagged && ['Bags loaded', formatNumber(t.loading?.bags, 0)]].filter(Boolean)}
+                extra={[
+                  t.loading?.method === 'bags' && ['Worked out by', `Bag count × ${formatNumber(t.material?.bagWeightKg ?? 50, 0)} kg (no weighbridge)`],
+                  bagged && ['Bags loaded', formatNumber(t.loading?.bags, 0)],
+                ].filter(Boolean)}
               />
               <Weighing title="When it arrived" place={t.destination?.name} side={t.receipt} extra={[['Receipt no.', t.receipt?.grnNo], t.receipt?.remarks && ['Remarks', t.receipt.remarks]].filter(Boolean)} />
             </div>
@@ -182,8 +202,19 @@ export default function TripDetailPage() {
           <Card>
             <CardHeader icon={BankNote01} title="Truck payment" badge={<FreightBadge status={fr.status} />} />
             <div className="p-5 md:p-6">
+              {tp && (
+                <RateRequestBox
+                  req={tp}
+                  {...reviewProps('truckPrice')}
+                  where={tp.distanceKm ? `${formatNumber(tp.distanceKm, 1)} km` : null}
+                  pendingNote="Until you decide, your price is used and the payment cannot be marked paid."
+                />
+              )}
               <dl className="space-y-3 text-sm">
-                <Row label={`Truck rate ${formatINR(fr.rate)} × ${formatNumber(t.loading?.qty, 3)}`} value={formatINR(fr.amount)} />
+                <Row
+                  label={fr.pricePerTruck != null ? 'Price per truck (agreed)' : `Truck rate ${formatINR(fr.rate)} × ${formatNumber(t.loading?.qty, 3)}`}
+                  value={formatINR(fr.amount)}
+                />
                 <Row label="Advance paid" value={`− ${formatINR(fr.advance)}`} />
                 <Row label="Cut for loss / damage" value={`− ${formatINR(fr.deduction)}`} bad={fr.deduction > 0} />
                 <div className="border-t border-secondary pt-3">
@@ -210,7 +241,7 @@ export default function TripDetailPage() {
                 )}
                 {fr.status === 'ready' && (
                   <>
-                    <Button iconLeading={BankNote01} isLoading={paid.isPending} onPress={() => paid.mutate()}>
+                    <Button iconLeading={BankNote01} isLoading={paid.isPending} isDisabled={pricePending} onPress={() => paid.mutate()}>
                       Mark paid
                     </Button>
                     {fr.deduction > 0 && (
@@ -228,6 +259,18 @@ export default function TripDetailPage() {
               </div>
             </div>
           </Card>
+
+          {lc && (
+            <Card>
+              <CardHeader icon={Users01} title="Labour cost" subtitle={`Unloading labour for this truck at ${t.sourceLocation?.name ?? 'the station / port'}.`} />
+              <div className="p-5 md:p-6">
+                <RateRequestBox req={lc} {...reviewProps('labourCost')} pendingNote="Until you decide, your labour cost is used." />
+                <dl className="text-sm">
+                  <Row label={<span className="font-semibold text-primary">Labour cost for this truck</span>} value={<span className="text-lg font-semibold text-primary">{formatINR(lc.agreed)}</span>} />
+                </dl>
+              </div>
+            </Card>
+          )}
 
           <Card>
             <CardHeader icon={Truck01} title="Truck & driver" />
@@ -271,6 +314,21 @@ export default function TripDetailPage() {
         onConfirm={(r) => waive.mutate(r)}
       />
       <ConfirmDialog
+        open={Boolean(rejecting)}
+        onClose={() => setDialog(null)}
+        loading={rejectRate.isPending}
+        needReason
+        title="Keep your rate?"
+        message={
+          rejecting === 'truckPrice'
+            ? `The new price ${formatINR(rejectingReq?.requested)} is rejected and ${rejectingReq?.quoted != null ? `your price ${formatINR(rejectingReq.quoted)}` : 'the normal truck rate'} is paid. Your reason is saved in History.`
+            : `The new labour cost ${formatINR(rejectingReq?.requested)} is rejected and ${rejectingReq?.quoted != null ? `your cost ${formatINR(rejectingReq.quoted)}` : 'no labour cost'} is used. Your reason is saved in History.`
+        }
+        confirmLabel="Reject"
+        variant="danger"
+        onConfirm={(reason) => rejectRate.mutate({ kind: rejecting, reason })}
+      />
+      <ConfirmDialog
         open={dialog === 'cancel'}
         onClose={() => setDialog(null)}
         loading={cancel.isPending}
@@ -284,6 +342,55 @@ export default function TripDetailPage() {
       {dialog === 'correct' && <CorrectDialog trip={t} onClose={() => setDialog(null)} />}
       {dialog === 'advance' && <AdvanceDialog trip={t} onClose={() => setDialog(null)} />}
     </>
+  );
+}
+
+/**
+ * One owner rate on this trip (price per truck or labour cost): your rate, and any new amount
+ * loading staff asked for — with Approve / Keep buttons while it waits.
+ */
+function RateRequestBox({ kind, req, where, pendingNote, approving, onApprove, onReject }) {
+  const name = PRICE_REQUEST_KINDS[kind].label.toLowerCase();
+  const yours = req.quoted != null ? formatINR(req.quoted) : 'not set';
+  const at = where ? ` · ${where}` : '';
+  if (req.status === 'pending') {
+    return (
+      <Alert tone="warning" icon={CurrencyRupeeCircle} className="mb-5" title={`New ${name} asked: ${formatINR(req.requested)}`}>
+        <p>
+          Your {name}: {yours}
+          {at}. Asked by {req.requestedBy?.name ?? 'loading staff'} on {formatDateTime(req.requestedAt)}.
+        </p>
+        <p className="mt-1">Reason: {req.reason}</p>
+        <p className="mt-1">{pendingNote}</p>
+        <div className="mt-3 flex flex-wrap gap-3">
+          <Button size="sm" iconLeading={CheckCircle} isLoading={approving} onPress={onApprove}>
+            Approve new amount
+          </Button>
+          <Button size="sm" color="secondary" onPress={onReject}>
+            Keep my rate
+          </Button>
+        </div>
+      </Alert>
+    );
+  }
+  const by = req.reviewedBy?.name ? ` by ${req.reviewedBy.name}` : '';
+  return (
+    <div className="mb-5 rounded-lg bg-secondary p-3 text-sm text-tertiary">
+      <p>
+        Your {name}: <span className="font-medium text-secondary">{yours}</span>
+        {at}
+      </p>
+      {req.status === 'approved' && (
+        <p className="mt-1">
+          New amount <span className="font-medium text-secondary">{formatINR(req.requested)}</span> approved{by} on {formatDateTime(req.reviewedAt)}. Reason asked: {req.reason}
+        </p>
+      )}
+      {req.status === 'rejected' && (
+        <p className="mt-1">
+          New amount {formatINR(req.requested)} rejected{by}: {req.reviewNote}
+        </p>
+      )}
+    </div>
   );
 }
 

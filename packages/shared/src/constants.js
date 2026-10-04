@@ -31,6 +31,10 @@ export const CONSIGNMENT_MODE_LABELS = Object.freeze({
   coastal_ship: 'Ship',
 });
 
+/** How the late fee (demurrage) is charged once free hours are over. Trains: per wagon. */
+export const LATE_FEE_BASIS = Object.freeze({ HOUR: 'hour', DAY: 'day', ONCE: 'once' });
+export const LATE_FEE_BASIS_LABELS = Object.freeze({ hour: 'Per hour', day: 'Per day', once: 'One time' });
+
 /** Rail uses a Railway Receipt (RR); water uses a Bill of Lading (BL). */
 export const REFERENCE_TYPE_BY_MODE = Object.freeze({
   rail_rake: 'RR',
@@ -62,6 +66,41 @@ export const UNITS = Object.freeze({
   MT: 'MT',
 });
 
+/**
+ * Unit the quantity on a shipment paper is written in. Converted to the product's unit (MT or bags).
+ * BAGS is stored as 'pieces' (its first name) so shipments already saved with it keep working.
+ */
+export const PAPER_UNITS = Object.freeze({ KG: 'kg', TONS: 'tons', BAGS: 'pieces' });
+export const PAPER_UNIT_LABELS = Object.freeze({ kg: 'KG', tons: 'Metric Tonne (MT)', pieces: 'Bags' });
+
+/** Documents attached to a shipment (bill, RR / BL…). Owner only. */
+export const DOCUMENT_KINDS = Object.freeze({
+  SELLER_BILL: 'seller_bill',
+  SHIPMENT_PAPER: 'shipment_paper',
+  WEIGHMENT: 'weighment',
+  OTHER: 'other',
+});
+export const DOCUMENT_KIND_LABELS = Object.freeze({
+  seller_bill: 'Seller bill',
+  shipment_paper: 'RR / Bill of Lading',
+  weighment: 'Weighment slip',
+  other: 'Other',
+});
+/** PDF and pictures, up to 10 MB each. */
+export const DOCUMENT_TYPES = Object.freeze(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']);
+export const DOCUMENT_MAX_MB = 10;
+
+/** How the loaded material weight is worked out at loading. Bag count works only for bagged material. */
+export const WEIGH_METHODS = Object.freeze({
+  WEIGHT: 'weight', // weighbridge: full truck − empty truck
+  BAGS: 'bags', // bags loaded × bag weight
+});
+
+export const WEIGH_METHOD_LABELS = Object.freeze({
+  weight: 'Full truck and empty truck weight',
+  bags: 'Number of bags loaded',
+});
+
 export const LOCATION_TYPES = Object.freeze({
   SIDING: 'siding',
   PORT: 'port',
@@ -75,6 +114,11 @@ export const LOCATION_TYPE_LABELS = Object.freeze({
   stockyard: 'Warehouse',
   customer_site: 'Delivery site',
 });
+
+/** Railway stations and ports — where shipments are unloaded. */
+export const UNLOADING_POINT_TYPES = Object.freeze([LOCATION_TYPES.SIDING, LOCATION_TYPES.PORT]);
+/** Places trucks are sent to. Each keeps its distance and truck price from every unloading point. */
+export const ROUTED_LOCATION_TYPES = Object.freeze([LOCATION_TYPES.STOCKYARD, LOCATION_TYPES.CUSTOMER_SITE]);
 
 export const TRIP_SOURCE = Object.freeze({
   CONSIGNMENT: 'consignment', // lifted from a rake / ship
@@ -172,6 +216,26 @@ export const ALERT_TYPES = Object.freeze({
   BREAKDOWN: 'breakdown',
   PIN_RESET: 'pin_reset',
   STOCK_MISMATCH: 'stock_mismatch',
+  TRUCK_PRICE_REQUEST: 'truck_price_request',
+  LABOUR_COST_REQUEST: 'labour_cost_request',
+});
+
+/**
+ * Owner rates on a trip from a shipment (price per truck, unloading labour per truck).
+ * "quoted" = the owner's rate is used as is. A different amount asked for by loading staff
+ * is "pending" until the owner approves or rejects it.
+ */
+export const PRICE_REQUEST_STATUS = Object.freeze({
+  QUOTED: 'quoted',
+  PENDING: 'pending',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+});
+
+/** The trip rates loading staff can ask to change. Key = field on the trip. */
+export const PRICE_REQUEST_KINDS = Object.freeze({
+  truckPrice: { label: 'Price per truck', alertType: ALERT_TYPES.TRUCK_PRICE_REQUEST, path: 'truck-price' },
+  labourCost: { label: 'Labour cost per truck', alertType: ALERT_TYPES.LABOUR_COST_REQUEST, path: 'labour-cost' },
 });
 
 export const DEFAULT_SETTINGS = Object.freeze({

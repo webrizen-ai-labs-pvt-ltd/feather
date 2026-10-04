@@ -12,6 +12,7 @@ import DashboardPage from '@/pages/DashboardPage.jsx';
 import HelpPage from '@/pages/HelpPage.jsx';
 import LoginPage from '@/pages/LoginPage.jsx';
 import MastersPage from '@/pages/MastersPage.jsx';
+import SellersPage from '@/pages/SellersPage.jsx';
 import SettingsPage from '@/pages/SettingsPage.jsx';
 import StockPage from '@/pages/StockPage.jsx';
 import TransportersPage from '@/pages/TransportersPage.jsx';
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="customers" element={<CustomersPage />} />
         <Route path="customers/:id" element={<CustomerDetailPage />} />
         <Route path="truck-companies" element={<TransportersPage />} />
+        <Route path="sellers" element={<SellersPage />} />
         <Route path="inventory" element={<StockPage />} />
         <Route path="setup" element={<MastersPage />} />
         <Route path="staff" element={<UsersPage />} />

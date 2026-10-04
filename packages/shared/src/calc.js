@@ -2,7 +2,7 @@
  * Pure business calculations. Used by the API (source of truth) and by the
  * frontends for previews. Quantities: MT to 3 decimals, money to 2 decimals.
  */
-import { CUBIC_METERS_PER_BRASS } from './constants.js';
+import { CUBIC_METERS_PER_BRASS, PAPER_UNITS } from './constants.js';
 
 export const round = (value, places = 3) => {
   const f = 10 ** places;
@@ -22,6 +22,30 @@ export function netWeight(gross, tare) {
   }
   if (g <= t) throw new RangeError('Gross weight must be more than empty truck weight.');
   return round(g - t);
+}
+
+/** Material weight in MT worked out from a bag count (no weighbridge). */
+export function bagsToTons(bags, bagWeightKg = 50) {
+  const n = Number(bags);
+  const kg = Number(bagWeightKg) || 50;
+  if (!Number.isInteger(n) || n <= 0) throw new RangeError('Number of bags must be more than zero.');
+  return round((n * kg) / 1000);
+}
+
+/**
+ * A shipment-paper quantity (KG / Metric Tonne / Bags) in the product's own unit:
+ * MT for weighed products, bags for bagged ones. Bags are rounded to whole bags.
+ */
+export function paperQtyToUnit(qty, paperUnit, { unit, bagWeightKg = 50 }) {
+  const n = Number(qty);
+  const bagKg = Number(bagWeightKg) || 50;
+  if (unit === 'bag') {
+    if (paperUnit === PAPER_UNITS.BAGS) return Math.round(n);
+    const kg = paperUnit === PAPER_UNITS.KG ? n : n * 1000;
+    return Math.round(kg / bagKg);
+  }
+  if (paperUnit === PAPER_UNITS.BAGS) throw new RangeError('Bags is only for products counted in bags. Choose KG or Metric Tonne (MT).');
+  return round(paperUnit === PAPER_UNITS.KG ? n / 1000 : n);
 }
 
 /**
@@ -100,12 +124,44 @@ export function bagDebit(rec, { costPerBag, bagWeightKg = 50, burstDiscountPct =
   };
 }
 
-/** Freight settlement for one trip. A negative balance means we recover money from the transporter. */
-export function freightSettlement({ loadedQty, rate, advance = 0, deduction = 0 }) {
-  const amount = roundMoney(loadedQty * rate);
+/**
+ * Freight settlement for one trip. A negative balance means we recover money from the transporter.
+ * With an agreed pricePerTruck the truck is paid that flat price; otherwise loaded quantity × rate.
+ */
+export function freightSettlement({ loadedQty, rate, pricePerTruck, advance = 0, deduction = 0 }) {
+  const amount = roundMoney(pricePerTruck ?? loadedQty * rate);
   const balance = roundMoney(amount - advance - deduction);
   return { amount, advance: roundMoney(advance), deduction: roundMoney(deduction), balance, recoverable: balance < 0 ? -balance : 0 };
 }
+
+/**
+ * Late fee once free hours are over. basis: 'hour' (each started hour), 'day' (each started day)
+ * or 'once' (a single charge if late at all). A train is charged per wagon; a barge / ship
+ * (no wagons) is charged the rate once for the whole vessel.
+ */
+export function lateFee({ overHours, rate = 0, basis = 'hour', wagonCount = 0 }) {
+  if (overHours === null || overHours === undefined) return null;
+  const units = wagonCount > 0 ? wagonCount : 1;
+  const over = round(overHours, 4);
+  const periods = basis === 'once' ? (over > 0 ? 1 : 0) : basis === 'day' ? Math.ceil(over / 24) : Math.ceil(over);
+  return roundMoney(periods * units * rate);
+}
+
+/** Late fee terms of a shipment (older shipments only have a per-wagon-hour rate). */
+export const lateFeeTerms = (c) => ({ basis: c.demurrageBasis ?? 'hour', rate: c.demurrageRate ?? c.demurrageRatePerWagonHour ?? 0 });
+
+/** Free-hours clock for a shipment record. extra: { releasedAt?, warnHours?, now? } */
+export const shipmentDemurrage = (c, extra = {}) =>
+  demurrage({
+    placedAt: c.placedAt,
+    freeTimeHours: c.freeTimeHours,
+    wagonCount: c.wagonCount,
+    ...lateFeeTerms(c),
+    declaredQty: c.declaredQty,
+    liftedQty: c.liftedQty,
+    releasedAt: c.releasedAt,
+    ...extra,
+  });
 
 /**
  * Railway / port free-time clock for a placed rake or ship.
@@ -115,6 +171,8 @@ export function demurrage({
   placedAt,
   freeTimeHours,
   wagonCount = 0,
+  rate,
+  basis = 'hour',
   ratePerWagonHour = 0,
   declaredQty,
   liftedQty,
@@ -139,7 +197,7 @@ export function demurrage({
   const overHours = projectedFinishAt ? Math.max(0, hoursBetween(freeEndsAt, projectedFinishAt)) : null;
   // Railways bill each started hour.
   const billableHours = overHours === null ? null : Math.ceil(round(overHours, 4));
-  const penalty = billableHours === null ? null : roundMoney(billableHours * wagonCount * ratePerWagonHour);
+  const penalty = lateFee({ overHours, rate: rate ?? ratePerWagonHour, basis, wagonCount });
 
   let status = 'ok';
   if (releasedAt) status = billableHours > 0 ? 'penalty' : 'done';
@@ -161,6 +219,13 @@ export function demurrage({
     isFinal: Boolean(releasedAt),
   };
 }
+
+/** The owner's route (distance, price per truck) from an unloading point to a warehouse / delivery site. */
+export const routeFrom = (place, fromId) =>
+  fromId ? (place?.routes ?? []).find((r) => String(r.from?._id ?? r.from) === String(fromId)) ?? null : null;
+
+/** Rate in force for a trip (price per truck, labour cost): the approved new amount, else the owner's quote (undefined = none). */
+export const agreedPrice = (request) => (request?.status === 'approved' ? request.requested : request?.quoted ?? undefined);
 
 /** Age buckets for unpaid invoices (days since invoice date). */
 export const AGING_BUCKETS = Object.freeze([

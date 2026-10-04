@@ -1,7 +1,7 @@
-import { CheckDone01, Edit03, FileCheck02, Package, Play, Truck01 } from '@untitledui/icons';
+import { CheckDone01, Edit03, FileCheck02, Package, Play, Trash01, Truck01 } from '@untitledui/icons';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { CONSIGNMENT_MODE_LABELS, formatDateTime, formatINR, formatNumber, formatPct, formatQty, formatVehicleNo } from '@feather/shared';
+import { CONSIGNMENT_MODE_LABELS, formatDateTime, formatINR, formatNumber, formatPct, formatQty, formatVehicleNo, lateFeeTerms, PAPER_UNIT_LABELS } from '@feather/shared';
 import {
   Button,
   Card,
@@ -22,6 +22,7 @@ import {
   truckTracking,
   MiniTracker,
 } from '@feather/ui';
+import { DocumentsCard } from '@/components/Documents.jsx';
 import { useAction, useGet } from '@/lib/hooks.js';
 import { ConsignmentForm } from '@/pages/ConsignmentsPage.jsx';
 
@@ -30,6 +31,14 @@ const ACTIONS = {
   release: { title: 'Mark as emptied?', message: 'Do this when the shipment is fully unloaded and handed back. The final late fee is fixed.', confirm: 'Mark emptied' },
   close: { title: 'Close this shipment?', message: 'A closed shipment cannot take more trucks.', confirm: 'Close shipment', needReason: true },
 };
+
+/** e.g. "₹150 per wagon per hour", "₹50,000 one time". */
+function lateFeeText(c) {
+  const { basis, rate } = lateFeeTerms(c);
+  if (!rate) return '—';
+  const unit = { hour: 'per hour', day: 'per day', once: 'one time' }[basis];
+  return `${formatINR(rate)} ${c.wagonCount > 0 ? `per wagon ${unit}` : unit}`;
+}
 
 export default function ConsignmentDetailPage() {
   const { id } = useParams();
@@ -41,6 +50,11 @@ export default function ConsignmentDetailPage() {
     success: 'Updated',
     invalidate: ['/consignments', '/admin'],
     onSuccess: () => setConfirm(null),
+  });
+  const remove = useAction((api, reason) => api.post(`/consignments/${id}/delete`, { reason }), {
+    success: 'Shipment deleted',
+    invalidate: ['/consignments', '/admin'],
+    onSuccess: () => navigate('/shipments', { replace: true }),
   });
   if (isLoading) return <Loading />;
   const c = data.item;
@@ -55,7 +69,7 @@ export default function ConsignmentDetailPage() {
         help="owner-rakes"
         breadcrumbs={[{ label: 'Shipments', href: '/shipments' }]}
         title={c.referenceNo}
-        subtitle={`${CONSIGNMENT_MODE_LABELS[c.mode]} · ${c.material?.name} · from ${c.supplier}`}
+        subtitle={`${CONSIGNMENT_MODE_LABELS[c.mode]} · ${c.material?.name} · from ${c.seller?.name ?? c.supplier}`}
         actions={
           <>
             <ConsignmentStatusBadge status={c.status} />
@@ -75,6 +89,12 @@ export default function ConsignmentDetailPage() {
             {c.status === 'released' && (
               <Button color="secondary" iconLeading={CheckDone01} onPress={() => setConfirm('close')}>
                 Close
+              </Button>
+            )}
+            {/* Only a shipment no truck was loaded from can be deleted (mistakes, demo data). */}
+            {data.trips.length === 0 && (
+              <Button color="secondary-destructive" iconLeading={Trash01} onPress={() => setConfirm('delete')}>
+                Delete
               </Button>
             )}
           </>
@@ -153,11 +173,15 @@ export default function ConsignmentDetailPage() {
                 columns={1}
                 items={[
                   ['Unloading point', c.location?.name],
+                  // As written on the paper (KG / Metric Tonne / Bags); the tiles above show it in tonnes or bags.
+                  c.declaredUnit && ['Quantity on paper', `${formatNumber(c.paperQty, 3)} ${PAPER_UNIT_LABELS[c.declaredUnit]}`],
                   ['Wagons', c.wagonCount || '—'],
                   ['Free hours', `${c.freeTimeHours} hours`],
-                  ['Late fee rate', formatINR(c.demurrageRatePerWagonHour)],
-                  ['Purchase rate', c.purchaseRatePerUnit ? `${formatINR(c.purchaseRatePerUnit)} / ${unit}` : '—'],
-                  ['Truck rate', c.freightRatePerUnit ? `${formatINR(c.freightRatePerUnit)} / ${unit}` : "Truck company's rate"],
+                  ['Late fee', lateFeeText(c)],
+                  ['Total bill', c.purchaseAmount != null ? formatINR(c.purchaseAmount) : '—'],
+                  ['Purchase rate', c.purchaseRatePerUnit ? `₹${formatNumber(c.purchaseRatePerUnit, 2)} / ${unit}` : '—'],
+                  // Older shipments may still carry their own truck rate.
+                  c.freightRatePerUnit && ['Truck rate', `${formatINR(c.freightRatePerUnit)} / ${unit}`],
                   ['Arrived at', formatDateTime(c.placedAt)],
                   ['Emptied at', formatDateTime(c.releasedAt)],
                   c.demurrage?.finalPenalty != null && ['Final late fee', formatINR(c.demurrage.finalPenalty)],
@@ -166,11 +190,23 @@ export default function ConsignmentDetailPage() {
               />
             </div>
           </Card>
+          <DocumentsCard consignmentId={c._id} />
           <TrackingTimeline events={track.events} />
         </div>
       </div>
 
-      {confirm && (
+      <ConfirmDialog
+        open={confirm === 'delete'}
+        onClose={() => setConfirm(null)}
+        loading={remove.isPending}
+        needReason
+        variant="danger"
+        title={`Delete shipment ${c.referenceNo}?`}
+        message="It is removed from Shipments for good. A copy and your reason are saved in History."
+        confirmLabel="Delete shipment"
+        onConfirm={(reason) => remove.mutate(reason)}
+      />
+      {confirm && confirm !== 'delete' && (
         <ConfirmDialog
           open
           onClose={() => setConfirm(null)}

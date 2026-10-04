@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { FREIGHT_STATUS, TRIP_FLAGS, TRIP_SOURCE, TRIP_STATUS, UNITS } from '@feather/shared';
+import { FREIGHT_STATUS, PRICE_REQUEST_STATUS, TRIP_FLAGS, TRIP_SOURCE, TRIP_STATUS, UNITS, WEIGH_METHODS } from '@feather/shared';
 
 const { Schema } = mongoose;
 
@@ -22,6 +22,24 @@ const weighmentSchema = {
   by: { type: Schema.Types.ObjectId, ref: 'User' },
 };
 
+/**
+ * An owner rate on a trip that loading staff may ask to change.
+ * quoted = owner's rate at loading time; requested = staff's new amount, which counts only once
+ * the owner approves it; agreed = the amount in force (kept in step with status).
+ */
+const priceRequestSchema = () => ({
+  quoted: Number,
+  requested: Number,
+  agreed: Number,
+  reason: String,
+  requestedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  requestedAt: Date,
+  status: { type: String, enum: Object.values(PRICE_REQUEST_STATUS), index: true },
+  reviewedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  reviewedAt: Date,
+  reviewNote: String,
+});
+
 /** Child trip: one truck carrying part of a consignment (or a yard dispatch). */
 const tripSchema = new Schema(
   {
@@ -41,7 +59,8 @@ const tripSchema = new Schema(
     driverName: String,
     driverPhone: String,
 
-    loading: { ...weighmentSchema, bags: Number },
+    /** method: weighbridge (gross − tare) or bag count × bag weight (then gross / tare are empty). */
+    loading: { ...weighmentSchema, method: { type: String, enum: Object.values(WEIGH_METHODS), default: WEIGH_METHODS.WEIGHT }, bags: Number },
     receipt: {
       ...weighmentSchema,
       grnNo: String,
@@ -79,8 +98,15 @@ const tripSchema = new Schema(
       excessLossQty: Number,
     },
 
+    /** Price per truck for a trip from a shipment (owner's route price, or an approved new price). */
+    truckPrice: { ...priceRequestSchema(), distanceKm: Number },
+    /** Unloading labour per truck at the shipment's station / port. */
+    labourCost: priceRequestSchema(),
+
     freight: {
       rate: { type: Number, default: 0 },
+      /** Agreed price per truck in force. When set, it is the truck payment instead of rate × quantity. */
+      pricePerTruck: Number,
       amount: { type: Number, default: 0 },
       advance: { type: Number, default: 0 },
       deduction: { type: Number, default: 0 },

@@ -11,7 +11,7 @@ import { env } from '@/config/env.js';
 
 const LINK_TTL_SECONDS = 60 * 60;
 const LOCAL_ROOT = path.resolve(import.meta.dirname, '../../uploads');
-const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' };
 
 let s3;
 const client = () =>
@@ -43,13 +43,15 @@ export async function putFile({ folder, buffer, contentType }) {
 
 const sign = (key, exp) => crypto.createHmac('sha256', env.storage.fileUrlSecret).update(`${key}:${exp}`).digest('hex');
 
-export async function fileUrl(key) {
+/** Short-lived link to view a stored file. fileName: shown name when the file opens (documents). */
+export async function fileUrl(key, { fileName } = {}) {
   if (!key) return null;
   if (env.storage.driver === 'local') {
     const exp = Math.floor(Date.now() / 1000) + LINK_TTL_SECONDS;
     return `/api/files/local/${key}?exp=${exp}&sig=${sign(key, exp)}`;
   }
-  return getSignedUrl(client(), new GetObjectCommand({ Bucket: env.storage.r2Bucket, Key: key }), {
+  const disposition = fileName ? `inline; filename*=UTF-8''${encodeURIComponent(fileName)}` : undefined;
+  return getSignedUrl(client(), new GetObjectCommand({ Bucket: env.storage.r2Bucket, Key: key, ResponseContentDisposition: disposition }), {
     expiresIn: LINK_TTL_SECONDS,
   });
 }

@@ -11,6 +11,7 @@ const VIEWS = [
   { value: 'all', label: 'All', query: {} },
   { value: 'road', label: 'On the way', query: { status: 'in_transit' } },
   { value: 'hold', label: 'Payment on hold', query: { freight: 'locked' } },
+  { value: 'approval', label: 'Needs approval', query: { approval: 'pending' } },
   { value: 'ready', label: 'Ready to pay', query: { freight: 'ready' } },
   { value: 'problems', label: 'With problems', query: { flagged: 'true' } },
   { value: 'paid', label: 'Paid', query: { freight: 'paid' } },
@@ -22,6 +23,7 @@ function viewFromParams(params) {
   if (fr === 'locked') return 'hold';
   if (fr === 'ready') return 'ready';
   if (fr === 'paid') return 'paid';
+  if (params.get('approval') === 'pending') return 'approval';
   if (params.get('flagged') === 'true') return 'problems';
   return 'all';
 }

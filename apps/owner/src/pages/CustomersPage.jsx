@@ -1,4 +1,4 @@
-import { Download01, Plus, Wallet02 } from '@untitledui/icons';
+import { Download01, Wallet02 } from '@untitledui/icons';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { AGING_BUCKETS, CREDIT_REASON_LABELS, formatLakh } from '@feather/shared';
@@ -10,7 +10,6 @@ const initials = (n = '') => n.split(/\s+/).slice(0, 2).map((w) => w[0]).join(''
 export default function CustomersPage() {
   const { data, isLoading } = useGet('/sales/credit');
   const { data: settings } = useGet('/admin/settings');
-  const [creating, setCreating] = useState(false);
   const [view, setView] = useState('all');
   const navigate = useNavigate();
   const api = useApi();
@@ -27,11 +26,9 @@ export default function CustomersPage() {
         subtitle={`Default limit ${formatLakh(settings?.settings.defaultCreditLimit)} · ${settings?.settings.defaultCreditDays ?? '—'} days. Customers on hold cannot get a new truck until they pay or you allow it anyway.`}
         actions={
           <>
+            {/* Finance view only — customers are added in Setup → Business setup. */}
             <Button color="secondary" iconLeading={Download01} onPress={() => api.download('/exports/credit.xlsx')}>
               Excel
-            </Button>
-            <Button iconLeading={Plus} onPress={() => setCreating(true)}>
-              New customer
             </Button>
           </>
         }
@@ -105,7 +102,6 @@ export default function CustomersPage() {
           ]}
         />
       )}
-      {creating && <CustomerForm onClose={() => setCreating(false)} />}
     </>
   );
 }
@@ -133,7 +129,7 @@ export function CustomerForm({ existing, onClose }) {
       onClose={onClose}
       icon={Wallet02}
       title={existing ? 'Edit customer' : 'New customer'}
-      description="Add delivery sites for this customer under Products & places."
+      description="Add delivery sites for this customer under Business setup."
       footer={
         <>
           <Button color="secondary" onPress={onClose}>

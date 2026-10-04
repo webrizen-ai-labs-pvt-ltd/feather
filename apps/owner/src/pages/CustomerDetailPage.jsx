@@ -213,7 +213,7 @@ export default function CustomerDetailPage() {
             {
               label: 'Delivery sites',
               count: sites.length,
-              content: <DataTable dense rows={sites} empty="No delivery sites. Add one under Products & places." columns={[{ key: 'name', header: 'Site' }, { key: 'address', header: 'Address' }]} />,
+              content: <DataTable dense rows={sites} empty="No delivery sites. Add one under Business setup." columns={[{ key: 'name', header: 'Site' }, { key: 'address', header: 'Address' }]} />,
             },
           ]}
         />

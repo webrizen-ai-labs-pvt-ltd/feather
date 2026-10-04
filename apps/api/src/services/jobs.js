@@ -7,11 +7,11 @@ import {
   ALERT_SEVERITY,
   ALERT_TYPES,
   CONSIGNMENT_STATUS,
-  demurrage,
   formatHours,
   formatINR,
   formatQty,
   formatVehicleNo,
+  shipmentDemurrage,
   TRIP_FLAGS,
   TRIP_STATUS,
 } from '@feather/shared';
@@ -25,15 +25,7 @@ const SEVERITY_ORDER = ['ok', 'at_risk', 'overdue'];
 async function checkDemurrage(settings) {
   const placed = await Consignment.find({ status: CONSIGNMENT_STATUS.PLACED }).populate('location', 'name');
   for (const c of placed) {
-    const clock = demurrage({
-      placedAt: c.placedAt,
-      freeTimeHours: c.freeTimeHours,
-      wagonCount: c.wagonCount,
-      ratePerWagonHour: c.demurrageRatePerWagonHour ?? 0,
-      declaredQty: c.declaredQty,
-      liftedQty: c.liftedQty,
-      warnHours: settings.demurrageWarnHours,
-    });
+    const clock = shipmentDemurrage(c, { warnHours: settings.demurrageWarnHours });
     const last = c.demurrage?.lastAlertStatus ?? 'ok';
     // Alert only when things get worse, so the owner is not spammed every 5 minutes.
     if (SEVERITY_ORDER.indexOf(clock.status) <= SEVERITY_ORDER.indexOf(last)) continue;

@@ -272,8 +272,10 @@ export function truckTracking(trip, { money = true } = {}) {
 export function shipmentTracking(c) {
   const unit = c.material?.unit ?? c.unit;
   const pct = c.declaredQty ? Math.round((c.liftedQty / c.declaredQty) * 100) : 0;
+  // Seller is owner only — staff get neither seller nor supplier.
+  const from = c.seller?.name ?? c.supplier;
   const steps = [
-    { key: 'way', label: 'On the way', sub: c.supplier, at: c.createdAt },
+    { key: 'way', label: 'On the way', sub: from, at: c.createdAt },
     { key: 'arrived', label: 'Arrived', sub: c.location?.name, at: c.placedAt },
     { key: 'unloading', label: 'Unloading', sub: c.placedAt ? `${pct}% unloaded` : undefined },
     { key: 'emptied', label: 'Emptied', at: c.releasedAt },
@@ -289,7 +291,7 @@ export function shipmentTracking(c) {
     closed: 'Closed',
   }[c.status];
 
-  const events = [{ key: 'created', at: c.createdAt, icon: File06, title: 'Shipment added', detail: `${formatQty(c.declaredQty, unit)} from ${c.supplier}` }];
+  const events = [{ key: 'created', at: c.createdAt, icon: File06, title: 'Shipment added', detail: `${formatQty(c.declaredQty, unit)}${from ? ` from ${from}` : ''}` }];
   if (c.placedAt) events.push({ key: 'arrived', at: c.placedAt, icon: Train, tone: 'brand', title: `Arrived at ${c.location?.name ?? 'unloading point'}`, detail: 'Free-hours timer started' });
   if (c.releasedAt) events.push({ key: 'emptied', at: c.releasedAt, icon: Package, tone: c.demurrage?.finalPenalty ? 'warning' : 'success', title: 'Emptied and handed back' });
   if (c.closedAt) events.push({ key: 'closed', at: c.closedAt, icon: PackageCheck, tone: 'success', title: 'Shipment closed' });

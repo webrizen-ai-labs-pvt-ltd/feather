@@ -16,6 +16,8 @@ const materialSchema = new Schema(
     densityTPerM3: Number,
     /** Owner only. Used to value shortages and damage. Per MT or per bag. */
     landedCostPerUnit: { type: Number, default: 0 },
+    /** Who we buy it from. Owner only. Required on every save from the app (products made before sellers existed may still be blank). */
+    seller: { type: Schema.Types.ObjectId, ref: 'Seller', index: true },
     active: { type: Boolean, default: true },
   },
   opts,
@@ -32,6 +34,19 @@ const locationSchema = new Schema(
     customer: { type: Schema.Types.ObjectId, ref: 'Customer' },
     /** Normal road time to reach this place. Used to spot delayed trucks. */
     expectedTransitHours: Number,
+    /** Warehouses / delivery sites: distance and agreed truck price from each unloading point (station / port). */
+    routes: [
+      {
+        _id: false,
+        from: { type: Schema.Types.ObjectId, ref: 'Location', required: true },
+        distanceKm: { type: Number, required: true },
+        pricePerTruck: { type: Number, default: 0 }, // office only
+      },
+    ],
+    /** Railway stations / ports: unloading labour rates (office only). */
+    labourCostPerWagon: Number,
+    labourCostPerTruck: Number,
+    labourCostPerKg: Number,
     active: { type: Boolean, default: true },
   },
   opts,
@@ -74,7 +89,22 @@ const customerSchema = new Schema(
   opts,
 );
 
+/** Who we buy material from. Owner only. */
+const sellerSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true, unique: true },
+    contactPerson: String,
+    phone: String,
+    email: String,
+    gstin: String,
+    address: String,
+    active: { type: Boolean, default: true },
+  },
+  opts,
+);
+
 export const Material = mongoose.model('Material', materialSchema);
+export const Seller = mongoose.model('Seller', sellerSchema);
 export const Location = mongoose.model('Location', locationSchema);
 export const Transporter = mongoose.model('Transporter', transporterSchema);
 export const Vehicle = mongoose.model('Vehicle', vehicleSchema);

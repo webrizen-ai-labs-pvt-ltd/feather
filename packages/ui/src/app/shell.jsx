@@ -6,6 +6,7 @@
  * Built on Untitled UI nav items + React Aria.
  */
 import {
+  ChevronDown,
   ChevronRight,
   ChevronSelectorVertical,
   HelpCircle,
@@ -56,36 +57,146 @@ function isActive(item, pathname) {
   return item.end ? pathname === path : pathname === path || pathname.startsWith(`${path}/`);
 }
 
-function NavSections({ sections, pathname, onNavigate }) {
+const itemBadge = (item) =>
+  item.badge ? (
+    <Badge size="sm" type="pill-color" color={item.badgeColor ?? 'error'} className="ml-3">
+      {item.badge}
+    </Badge>
+  ) : undefined;
+
+/** Which groups are closed, remembered per app in this browser. Storage can be blocked — then it lasts until reload. */
+function useClosedGroups(storageKey) {
+  const [closed, setClosed] = useState(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(storageKey) ?? '[]'));
+    } catch {
+      return new Set();
+    }
+  });
+  const save = useCallback(
+    (next) => {
+      setClosed(next);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify([...next]));
+      } catch {
+        /* private mode — not remembered */
+      }
+    },
+    [storageKey],
+  );
+  return [closed, save];
+}
+
+/** One top-level link (Home, Alerts…). */
+function NavLink({ item, pathname, onNavigate, child }) {
   return (
-    <nav aria-label="Main" className="flex flex-col gap-5 px-4">
-      {sections.map((section, i) => (
-        <div key={section.label ?? i}>
-          {section.label && <p className="px-2 pb-1.5 text-xs font-semibold tracking-wide text-quaternary uppercase">{section.label}</p>}
-          <ul className="flex flex-col gap-0.5">
+    <NavItemBase type={child ? 'collapsible-child' : 'link'} href={item.href} icon={item.icon} current={isActive(item, pathname)} onClick={onNavigate} badge={itemBadge(item)}>
+      {item.label}
+    </NavItemBase>
+  );
+}
+
+/** A group heading that opens / closes its pages. Closed, it still shows a dot and the total of its pages' badges. */
+function NavGroup({ section, open, onToggle, pathname, onNavigate }) {
+  const id = `nav-group-${section.label.replace(/\W+/g, '-').toLowerCase()}`;
+  const hasCurrent = section.items.some((i) => isActive(i, pathname));
+  const badgeTotal = section.items.reduce((s, i) => s + (Number(i.badge) || 0), 0);
+  const Icon = section.icon;
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={onToggle}
+        className={cx(
+          'group/item flex w-full cursor-pointer items-center rounded-md p-2 text-left outline-focus-ring transition duration-100 ease-linear select-none hover:bg-primary_hover focus-visible:outline-2 focus-visible:outline-offset-2',
+          !open && hasCurrent && 'bg-secondary',
+        )}
+      >
+        {Icon && <Icon aria-hidden className={cx('mr-2 size-5 shrink-0 text-fg-quaternary', hasCurrent && 'text-fg-brand-secondary')} />}
+        <span className="flex-1 truncate text-sm font-semibold text-secondary">{section.label}</span>
+        {!open && badgeTotal > 0 && (
+          <Badge size="sm" type="pill-color" color="error" className="ml-2">
+            {badgeTotal}
+          </Badge>
+        )}
+        <ChevronDown aria-hidden className={cx('ml-2 size-4 shrink-0 stroke-[2.5px] text-fg-quaternary transition-transform duration-150', open ? 'rotate-0' : '-rotate-90')} />
+      </button>
+      {open && (
+        <ul id={id} className="relative mt-0.5 flex flex-col gap-0.5 before:absolute before:inset-y-1 before:left-[17px] before:w-px before:bg-border-secondary">
+          {section.items.map((item) => (
+            <li key={item.href}>
+              <NavLink item={item} pathname={pathname} onNavigate={onNavigate} child />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Sidebar navigation: sections without a label are plain links (Home, Alerts);
+ * labelled sections are groups that open / close. The group of the current page always opens.
+ */
+function NavSections({ sections, pathname, onNavigate, storageKey }) {
+  const [closed, setClosed] = useClosedGroups(storageKey);
+  const groups = sections.filter((s) => s.label).map((s) => s.label);
+  const allClosed = groups.length > 0 && groups.every((g) => closed.has(g));
+
+  // Opening a page (link, search, browser back) opens its group, so you can always see where you are.
+  useEffect(() => {
+    const current = sections.find((s) => s.label && s.items.some((i) => isActive(i, pathname)));
+    if (current && closed.has(current.label)) {
+      const next = new Set(closed);
+      next.delete(current.label);
+      setClosed(next);
+    }
+    // Only on navigation — a group the user closes stays closed until they go to one of its pages.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
+  const toggle = (label) => {
+    const next = new Set(closed);
+    if (next.has(label)) next.delete(label);
+    else next.add(label);
+    setClosed(next);
+  };
+
+  return (
+    <nav aria-label="Main" className="flex flex-col gap-4 px-4">
+      {groups.length > 1 && (
+        <div className="-mb-2 flex justify-end px-2">
+          <button
+            type="button"
+            onClick={() => setClosed(allClosed ? new Set() : new Set(groups))}
+            className="rounded text-xs font-semibold text-quaternary outline-focus-ring hover:text-tertiary focus-visible:outline-2"
+          >
+            {allClosed ? 'Expand all' : 'Collapse all'}
+          </button>
+        </div>
+      )}
+      {sections.map((section, i) =>
+        section.label ? (
+          <NavGroup
+            key={section.label}
+            section={section}
+            open={!closed.has(section.label)}
+            onToggle={() => toggle(section.label)}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        ) : (
+          <ul key={i} className="flex flex-col gap-0.5">
             {section.items.map((item) => (
               <li key={item.href}>
-                <NavItemBase
-                  type="link"
-                  href={item.href}
-                  icon={item.icon}
-                  current={isActive(item, pathname)}
-                  onClick={onNavigate}
-                  badge={
-                    item.badge ? (
-                      <Badge size="sm" type="pill-color" color={item.badgeColor ?? 'error'} className="ml-3">
-                        {item.badge}
-                      </Badge>
-                    ) : undefined
-                  }
-                >
-                  {item.label}
-                </NavItemBase>
+                <NavLink item={item} pathname={pathname} onNavigate={onNavigate} />
               </li>
             ))}
           </ul>
-        </div>
-      ))}
+        ),
+      )}
     </nav>
   );
 }
@@ -227,7 +338,8 @@ function Crumbs({ crumbs }) {
 
 /**
  * @param {{
- *   sections: {label?: string, items: {label:string, href:string, icon?:any, end?:boolean, badge?:any, keywords?:string}[]}[],
+ *   sections: {label?: string, icon?: any, items: {label:string, href:string, icon?:any, end?:boolean, badge?:any, keywords?:string}[]}[],
+ *     (a section with a label is a group that opens / closes; without one, its items are plain top-level links)
  *   bottomNav?: {label:string, href:string, icon:any, end?:boolean}[],
  *   appLabel: string, user: any, roleLabel: string, onLogout: () => void,
  *   notifications?: {href:string, count:number}, helpHref?: string, topbarExtras?: any, banner?: any, children: any
@@ -271,7 +383,7 @@ export function AppShell({ sections, bottomNav, appLabel, user, roleLabel, onLog
         </button>
       </div>
       <div className="flex-1 overflow-y-auto pb-4">
-        <NavSections sections={sections} pathname={pathname} onNavigate={closeDrawer} />
+        <NavSections sections={sections} pathname={pathname} onNavigate={closeDrawer} storageKey={`feather.nav.${appLabel}`} />
       </div>
       <div className="border-t border-secondary p-4">
         <AccountMenu user={user} roleLabel={roleLabel} onLogout={onLogout} helpHref={helpHref} />

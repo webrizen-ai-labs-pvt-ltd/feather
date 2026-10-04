@@ -2,23 +2,34 @@
  * Role-based shaping of API responses. The server removes what a role must not
  * see — hiding it only in the frontend is not enough.
  */
-import { canSeeBothEnds, canSeeMoney, canSeePurchasePrices, ROLES } from '@feather/shared';
+import { canSeeBothEnds, canSeeMoney, canSeeLoadingCosts, canSeePurchasePrices, ROLES } from '@feather/shared';
 import { fileUrl } from '@/services/storage.js';
 
 const plain = (doc) => (doc?.toObject ? doc.toObject({ virtuals: false }) : { ...doc });
 
 export function presentMaterial(doc, role) {
   const m = plain(doc);
-  if (!canSeePurchasePrices(role)) delete m.landedCostPerUnit;
+  // Purchase side — your cost and who you buy from — is owner only.
+  if (!canSeePurchasePrices(role)) {
+    delete m.landedCostPerUnit;
+    delete m.seller;
+  }
   return m;
 }
 
 export function presentConsignment(doc, role) {
   const c = plain(doc);
-  if (!canSeePurchasePrices(role)) delete c.purchaseRatePerUnit;
+  // Purchase side — rate and who it was bought from — is owner only.
+  if (!canSeePurchasePrices(role)) {
+    delete c.purchaseRatePerUnit;
+    delete c.purchaseAmount;
+    delete c.seller;
+    delete c.supplier;
+  }
   if (!canSeeMoney(role)) {
     delete c.freightRatePerUnit;
     delete c.demurrageRatePerWagonHour;
+    delete c.demurrageRate;
     if (c.demurrage) delete c.demurrage.finalPenalty;
   }
   // Field staff should not see how much has been received at the other end.
@@ -56,6 +67,11 @@ export async function presentTrip(doc, user, { photos = false } = {}) {
   if (!canSeeMoney(role)) {
     delete t.freight;
     delete t.credit;
+  }
+  // Loading staff see the rates they were shown / asked for; receiving staff never do.
+  if (!canSeeLoadingCosts(role)) {
+    delete t.truckPrice;
+    delete t.labourCost;
   }
   if (!canSeeBothEnds(role)) {
     // Blind entry: each side sees only its own numbers.

@@ -1,4 +1,5 @@
 import multer from 'multer';
+import { DOCUMENT_MAX_MB } from '@feather/shared';
 import { env } from '@/config/env.js';
 
 export function notFoundHandler(req, res) {
@@ -8,7 +9,9 @@ export function notFoundHandler(req, res) {
 // eslint-disable-next-line no-unused-vars
 export function errorHandler(err, req, res, _next) {
   if (err instanceof multer.MulterError) {
-    const message = err.code === 'LIMIT_FILE_SIZE' ? 'Photo is too large. Max 8 MB.' : 'Could not read the upload.';
+    // Photos (field "photo") allow 8 MB; documents (field "file") allow 10 MB.
+    const tooBig = err.field === 'file' ? `File is too large. Max ${DOCUMENT_MAX_MB} MB.` : 'Photo is too large. Max 8 MB.';
+    const message = err.code === 'LIMIT_FILE_SIZE' ? tooBig : 'Could not read the upload.';
     return res.status(400).json({ error: { message, code: 'UPLOAD' } });
   }
   if (err?.code === 11000) {

@@ -1,4 +1,4 @@
-import { Building07, Download01, Edit03, Plus } from '@untitledui/icons';
+import { Building07, Download01, Edit03 } from '@untitledui/icons';
 import { useState } from 'react';
 import { formatINR, formatLakh, formatNumber, formatPct } from '@feather/shared';
 import { Avatar, Button, DataTable, Loading, Meter, Modal, NumberField, PageHeader, Segmented, StatusBadge, SwitchField, TextField, useApi, useForm } from '@feather/ui';
@@ -27,11 +27,9 @@ export default function TransportersPage() {
         subtitle="Who loses material, who damages bags, and how much was cut from their payment."
         actions={
           <>
+            {/* Finance view only — truck companies are added in Setup → Business setup. */}
             <Button color="secondary" iconLeading={Download01} onPress={() => api.download('/exports/transporters.xlsx', { days })}>
               Scorecard Excel
-            </Button>
-            <Button iconLeading={Plus} onPress={() => setEditing({})}>
-              New truck company
             </Button>
           </>
         }
@@ -114,7 +112,7 @@ export default function TransportersPage() {
   );
 }
 
-function TransporterForm({ existing, onClose }) {
+export function TransporterForm({ existing, onClose }) {
   const f = useForm({
     name: existing?.name ?? '',
     phone: existing?.phone ?? '',

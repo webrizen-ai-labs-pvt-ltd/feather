@@ -4,9 +4,11 @@
  */
 import mongoose from 'mongoose';
 import {
+  agreedPrice,
   ALERT_SEVERITY,
   ALERT_TYPES,
   bagDebit,
+  bagsToTons,
   CONSIGNMENT_STATUS,
   CREDIT_REASON_LABELS,
   FREIGHT_STATUS,
@@ -23,12 +25,16 @@ import {
   round,
   roundMoney,
   ROLES,
+  routeFrom,
   STOCK_GRADES,
   transitLoss,
   TRIP_FLAGS,
   TRIP_FLAG_LABELS,
   TRIP_SOURCE,
   TRIP_STATUS,
+  PRICE_REQUEST_KINDS,
+  PRICE_REQUEST_STATUS,
+  WEIGH_METHODS,
 } from '@feather/shared';
 import { Alert, Consignment, Customer, Invoice, Location, Material, Order, Transporter, Trip, Vehicle } from '@/models/index.js';
 import { raiseAlert } from '@/services/alerts.js';
@@ -123,10 +129,12 @@ export async function createLoading({ input, file, user }) {
     throw badRequest('Truck must go to a warehouse or a delivery site.');
   }
 
-  // --- Quantity
-  const net = netWeight(input.grossWeight, input.tareWeight);
+  // --- Quantity: weighbridge (full − empty truck), or bag count × bag weight for bagged material.
   const isBagged = material.kind === MATERIAL_KINDS.BAGGED;
+  const byBags = input.weighMethod === WEIGH_METHODS.BAGS;
+  if (byBags && !isBagged) throw badRequest('This material is not in bags. Use full truck and empty truck weight.', { fields: { weighMethod: 'Not for this material' } });
   if (isBagged && !input.loadedBags) throw badRequest('Enter number of bags loaded.', { fields: { loadedBags: 'Required' } });
+  const net = byBags ? bagsToTons(input.loadedBags, material.bagWeightKg) : netWeight(input.grossWeight, input.tareWeight);
   const qty = isBagged ? input.loadedBags : net;
 
   if (!consignment) {
@@ -163,13 +171,27 @@ export async function createLoading({ input, file, user }) {
     }
   }
 
-  // --- Vehicle checks
-  const tareIssue = await tareHistoryFlag(input.vehicleNo, input.tareWeight, settings);
+  // --- Vehicle checks (no empty weight when loaded by bag count)
+  const tareIssue = byBags ? null : await tareHistoryFlag(input.vehicleNo, input.tareWeight, settings);
   if (tareIssue) flags.push(TRIP_FLAGS.TARE_HISTORY);
   if (input.wasOffline) flags.push(TRIP_FLAGS.OFFLINE_ENTRY);
 
   const transporter = await Transporter.findById(input.transporter);
   if (!transporter || !transporter.active) throw badRequest('Choose the truck company.');
+
+  // --- Owner rates for trips from a shipment: price per truck for the route and unloading labour per
+  // truck at the station / port. A different amount from loading staff waits for the owner's approval.
+  let truckPrice;
+  let labourCost;
+  let station;
+  if (consignment) {
+    station = await Location.findById(consignment.location, 'name type labourCostPerTruck').lean();
+    const route = routeFrom(destination, consignment.location);
+    truckPrice = priceRequestFor({ quoted: route?.pricePerTruck, asked: input.truckPrice, reason: input.truckPriceReason, user });
+    if (truckPrice) truckPrice.distanceKm = route?.distanceKm;
+    labourCost = priceRequestFor({ quoted: station?.labourCostPerTruck, asked: input.labourCost, reason: input.labourCostReason, user });
+  }
+  const pricePerTruck = truckPrice?.agreed;
 
   if (credit?.override) {
     const used = await consumeOverride(credit.override, tripId);
@@ -197,6 +219,7 @@ export async function createLoading({ input, file, user }) {
     driverName: input.driverName,
     driverPhone: input.driverPhone,
     loading: {
+      method: byBags ? WEIGH_METHODS.BAGS : WEIGH_METHODS.WEIGHT,
       gross: input.grossWeight,
       tare: input.tareWeight,
       net,
@@ -211,7 +234,9 @@ export async function createLoading({ input, file, user }) {
     },
     expectedTransitHours: destination.expectedTransitHours ?? settings.defaultExpectedTransitHours,
     flags,
-    freight: { rate, ...freightSettlement({ loadedQty: qty, rate }), status: FREIGHT_STATUS.ON_HOLD },
+    truckPrice,
+    labourCost,
+    freight: { rate, pricePerTruck, ...freightSettlement({ loadedQty: qty, rate, pricePerTruck }), status: FREIGHT_STATUS.ON_HOLD },
     credit,
     clientId: input.clientId,
     createdBy: user._id,
@@ -247,6 +272,9 @@ export async function createLoading({ input, file, user }) {
       trip: trip._id,
     });
   }
+  for (const kind of Object.keys(PRICE_REQUEST_KINDS)) {
+    if (trip[kind]?.status === PRICE_REQUEST_STATUS.PENDING) await priceRequestAlert({ kind, trip, consignment, station, destination, transporter, user });
+  }
   if (credit?.overrideReason) {
     await raiseAlert({
       type: ALERT_TYPES.CREDIT_OVERRIDE,
@@ -258,6 +286,73 @@ export async function createLoading({ input, file, user }) {
     });
   }
   return { trip, duplicate: false };
+}
+
+/**
+ * An owner rate on a new trip (price per truck, labour cost). An amount different from the owner's
+ * quote is a request: it waits for the owner's approval (the owner's own entry counts straight away).
+ * Returns undefined when there is neither a quote nor a request.
+ */
+export function priceRequestFor({ quoted, asked, reason, user }) {
+  const isRequest = asked !== undefined && asked !== quoted;
+  if (quoted == null && !isRequest) return undefined;
+  const request = { quoted: quoted ?? undefined, status: PRICE_REQUEST_STATUS.QUOTED };
+  if (isRequest) {
+    const at = new Date();
+    Object.assign(request, { requested: asked, reason, requestedBy: user._id, requestedAt: at });
+    if (user.role === ROLES.OWNER) Object.assign(request, { status: PRICE_REQUEST_STATUS.APPROVED, reviewedBy: user._id, reviewedAt: at });
+    else request.status = PRICE_REQUEST_STATUS.PENDING;
+  }
+  request.agreed = agreedPrice(request);
+  return request;
+}
+
+async function priceRequestAlert({ kind, trip, consignment, station, destination, transporter, user }) {
+  const r = trip[kind];
+  const truck = `Truck ${formatVehicleNo(trip.vehicleNo)}, ${transporter.name}.`;
+  const instead = r.quoted != null ? `your rate ${formatINR(r.quoted)}` : 'no rate (you have not set one)';
+  const lines =
+    kind === 'truckPrice'
+      ? [
+          `${user.name} asked for ${formatINR(r.requested)} per truck instead of ${instead}.`,
+          `Route: ${station?.name} → ${destination.name}${r.distanceKm ? ` (${r.distanceKm} km)` : ''}. ${truck}`,
+        ]
+      : [`${user.name} asked for unloading labour of ${formatINR(r.requested)} for this truck instead of ${instead}.`, `At: ${station?.name}. ${truck}`];
+  await raiseAlert({
+    type: PRICE_REQUEST_KINDS[kind].alertType,
+    title: `New ${PRICE_REQUEST_KINDS[kind].label.toLowerCase()} asked — ${trip.tripNo}`,
+    lines: [...lines, `Reason: ${r.reason}`, 'Open the trip to approve or reject. Until you approve, your rate is used.'],
+    trip: trip._id,
+    consignment: consignment._id,
+  });
+}
+
+/**
+ * Owner decision on a new rate. Approved → the new amount is used; rejected → the quote stays.
+ * For the price per truck, the truck payment is worked out again.
+ */
+export async function reviewPriceRequest({ trip, kind, approve, note, user }) {
+  const request = trip[kind];
+  if (request?.status !== PRICE_REQUEST_STATUS.PENDING) throw badRequest('There is nothing waiting for approval.');
+  if (kind === 'truckPrice' && trip.freight.status === FREIGHT_STATUS.PAID) throw badRequest('Truck payment is already paid.');
+  Object.assign(request, {
+    status: approve ? PRICE_REQUEST_STATUS.APPROVED : PRICE_REQUEST_STATUS.REJECTED,
+    reviewedBy: user._id,
+    reviewedAt: new Date(),
+    reviewNote: note,
+  });
+  request.agreed = agreedPrice(request);
+  if (kind === 'truckPrice') {
+    const pricePerTruck = request.agreed;
+    Object.assign(trip.freight, {
+      pricePerTruck,
+      ...freightSettlement({ loadedQty: trip.loading.qty, rate: trip.freight.rate, pricePerTruck, advance: trip.freight.advance, deduction: trip.freight.deduction }),
+    });
+  }
+  await trip.save();
+  // The request alert is dealt with.
+  await Alert.updateMany({ type: PRICE_REQUEST_KINDS[kind].alertType, trip: trip._id, readAt: null }, { readAt: new Date() });
+  return trip;
 }
 
 async function creditBlockedAlert(customerId, check, user) {
@@ -358,7 +453,8 @@ export function evaluateReceipt({ trip, material, settings, order, input, receiv
     stockLines.push({ grade: STOCK_GRADES.PRIME, qty: net });
   }
 
-  if (Math.abs(input.tareWeight - trip.loading.tare) > settings.tareMismatchTons) flags.add(TRIP_FLAGS.TARE_MISMATCH);
+  // Only when there was an empty weight at loading (not for bag-count loading).
+  if (trip.loading.tare && Math.abs(input.tareWeight - trip.loading.tare) > settings.tareMismatchTons) flags.add(TRIP_FLAGS.TARE_MISMATCH);
 
   const hoursOnRoad = (receivedAt - new Date(trip.loading.at)) / HOUR_MS;
   if (trip.expectedTransitHours && hoursOnRoad > trip.expectedTransitHours * settings.slowTransitFactor) {
@@ -369,6 +465,7 @@ export function evaluateReceipt({ trip, material, settings, order, input, receiv
   const settlement = freightSettlement({
     loadedQty: trip.loading.qty,
     rate: trip.freight.rate,
+    pricePerTruck: trip.freight.pricePerTruck,
     advance: trip.freight.advance,
     deduction,
   });
@@ -511,13 +608,14 @@ export async function correctTrip({ trip, input, user }) {
     const tare = input.loadingTare ?? trip.loading.tare;
     const net = netWeight(gross, tare);
     const qtyDiff = isBagged ? 0 : round(net - trip.loading.qty);
-    Object.assign(trip.loading, { gross, tare, net, qty: isBagged ? trip.loading.qty : net });
+    // A weighbridge correction turns a bag-count loading into a weighed one.
+    Object.assign(trip.loading, { method: WEIGH_METHODS.WEIGHT, gross, tare, net, qty: isBagged ? trip.loading.qty : net });
     if (qtyDiff) {
       if (trip.consignment) await Consignment.updateOne({ _id: trip.consignment }, { $inc: { liftedQty: qtyDiff, ...(trip.status === TRIP_STATUS.RECEIVED ? { receivedLoadedQty: qtyDiff } : {}) } });
       else await move({ location: trip.sourceLocation, material: material._id, unit: material.unit, qty: -qtyDiff, reason: 'correction', trip: trip._id, by: user._id });
       if (order) await Order.updateOne({ _id: order._id }, { $inc: { dispatchedQty: qtyDiff } });
     }
-    Object.assign(trip.freight, freightSettlement({ loadedQty: trip.loading.qty, rate: trip.freight.rate, advance: trip.freight.advance, deduction: trip.freight.deduction }));
+    Object.assign(trip.freight, freightSettlement({ loadedQty: trip.loading.qty, rate: trip.freight.rate, pricePerTruck: trip.freight.pricePerTruck, advance: trip.freight.advance, deduction: trip.freight.deduction }));
   }
 
   if (trip.status === TRIP_STATUS.RECEIVED) {

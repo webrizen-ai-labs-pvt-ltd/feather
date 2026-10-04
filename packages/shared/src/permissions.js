@@ -9,6 +9,12 @@ export const canSeePurchasePrices = (role) => role === OWNER;
 export const canSeeMoney = (role) => role === OWNER || role === DISPATCH_OPERATOR;
 
 /**
+ * Rates shown on the loading form (price per truck, unloading labour): office staff, and loading
+ * staff who see and can ask to revise them. Receiving staff never see them.
+ */
+export const canSeeLoadingCosts = (role) => canSeeMoney(role) || role === SIDING_SUPERVISOR;
+
+/**
  * Blind entry: field staff never see the weight or bag count recorded at the
  * other end of a trip, so they cannot type a number that "matches".
  */

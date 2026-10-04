@@ -154,7 +154,7 @@ export const HELP_SECTIONS = [
     group: 'siding',
     title: 'Load a truck, step by step',
     roles: [SIDING, DISPATCH],
-    keywords: 'load truck loading weighbridge slip photo full truck empty weight bags driver truck company on hold red',
+    keywords: 'load truck loading weighbridge slip photo full truck empty weight bags driver truck company on hold red payment price per truck new price calculation method bag count labour cost',
     body: (
       <>
         <Steps>
@@ -164,12 +164,20 @@ export const HELP_SECTIONS = [
           <>For a delivery site, choose the <b>Customer order</b> for that site.</>
           <><b>Truck number</b>: for example MH12AB1234. Spaces do not matter. If this truck came before, driver and truck company fill in by themselves.</>
           <>Type <b>Driver name</b> and <b>Driver mobile</b>, and choose the <b>Truck company</b>.</>
-          <>From the weighbridge slip, type <b>Full truck weight</b> and <b>Empty truck</b> in tonnes. Check the <b>Material weight</b> shown below matches the slip.</>
-          <>For cement, type <b>Bags loaded</b>.</>
+          <>Choose the <b>Calculation method</b>: <b>Full truck and empty truck weight</b> (weighbridge), or <b>Number of bags loaded</b> (cement in bags only).</>
+          <>By weight: from the weighbridge slip, type <b>Full truck</b> and <b>Empty truck</b> in tonnes. Check the <b>Material weight</b> shown below matches the slip.</>
+          <>For cement, type <b>Bags loaded</b>. By bag count, Feather works out the material weight from the bags (for example 600 bags × 50 kg = 30 T).</>
           <>Type the <b>Slip number</b> if there is one.</>
           <>Tap <b>Tap to open camera</b> and take a clear photo of the slip. Only the camera works. Old gallery photos are not allowed.</>
+          <><b>Labour cost</b> (trucks from a shipment): check the <b>Labour cost per truck</b> the owner set for this station or port.</>
+          <>If unloading cost more for this truck, turn on <b>Ask for a different labour cost</b>, type the new cost and write why.</>
+          <><b>Payment</b>: check the <b>Price per truck</b> the owner set for this route.</>
+          <>If the truck company wants a different price, turn on <b>Ask for a different price</b>, type the <b>New price per truck</b> and write why.</>
           <>Tap <b>Save & send truck</b>.</>
         </Steps>
+        <Note>
+          A new labour cost or price is only a request. The owner gets a notification and must approve it. Until then, the owner's amount is used.
+        </Note>
         <P>
           You see <b>Truck sent</b> with the trip number (and a delivery note number for customer trucks). Tap <b>Load next truck</b>. The shipment, destination and
           order stay filled in, so the next truck is faster.
@@ -443,13 +451,24 @@ export const HELP_SECTIONS = [
         <H>Add a new shipment</H>
         <Steps>
           <>Tap <b>New shipment</b> and choose the <b>Type</b>.</>
-          <>Type the <b>shipment paper number</b> (RR or Bill of Lading) and the <b>Supplier</b>.</>
+          <>Type the <b>shipment paper number</b> (RR or Bill of Lading). Choose the <b>Material</b> — the <b>Seller</b> fills in from the product; change it if you bought this shipment from someone else.</>
           <>Choose the <b>Material</b> and the <b>Unloading point</b>.</>
-          <>Type the <b>Quantity</b> on the paper and the number of <b>Wagons</b>.</>
-          <>Type <b>Free hours</b> in hours (usually 5 to 9) and <b>Late fee ₹ per wagon per hour</b>.</>
-          <>Optional: <b>Purchase rate</b> (only you see it), <b>Truck rate</b> per unit (blank = truck company's usual rate), <b>Expected arrival</b>, <b>Notes</b>.</>
-          <>Tap <b>Save</b>. The shipment appears on the loading staff's phone as "On the way".</>
+          <>Type the <b>Quantity</b> on the paper and choose its <b>Unit</b>: <b>KG</b>, <b>Metric Tonne (MT)</b> or <b>Bags</b> (cement only). Feather shows it in tonnes or bags underneath. For a train, the number of <b>Wagons</b> is required.</>
+          <>
+            <b>Free hours</b> starts at 9 — change it if your paper says otherwise. For the <b>Late fee</b>, choose <b>Per hour</b>, <b>Per day</b> or{' '}
+            <b>One time</b>, then type the amount. For a train it is charged per wagon.
+          </>
+          <>Optional: <b>Total billing amount</b> from the seller's bill (only you see it — Feather works out the rate per unit), <b>Expected arrival</b>, <b>Notes</b>.</>
+          <>
+            Optional: under <b>Attach bill / documents</b>, tap <b>Attach files</b> and choose the seller&apos;s bill, the RR / Bill of Lading or other papers
+            (PDF or picture, up to 10 MB each). Pick what each file is.
+          </>
+          <>Tap <b>Save</b>. The shipment appears on the loading staff's phone as "On the way". Attached files are uploaded right after.</>
         </Steps>
+        <Note>
+          Documents can also be added later: open the shipment and use <b>Documents → Add</b>. Click a file to open it. <b>Remove</b> takes it off the shipment
+          (your reason is kept in History). Only you can see documents.
+        </Note>
         <Table
           head={['Status', 'Meaning']}
           rows={[
@@ -513,12 +532,23 @@ export const HELP_SECTIONS = [
     group: 'owner',
     title: 'Paying truck companies and fixing mistakes',
     roles: [OWNER],
-    keywords: 'truck payment pay paid approve waive deduction advance recover correct weights cancel trip',
+    keywords: 'truck payment pay paid approve waive deduction advance recover correct weights cancel trip price per truck new price request labour cost approval',
     body: (
       <>
         <P>
-          The truck payment box shows truck payment (rate × quantity) minus advance minus deduction = <b>Balance to pay</b>. If the deduction is bigger, a red line says
-          how much to recover from the truck company.
+          The truck payment box shows truck payment minus advance minus deduction = <b>Balance to pay</b>. If the deduction is bigger, a red line says how much to
+          recover from the truck company.
+        </P>
+        <P>
+          Truck payment is your <b>price per truck</b> for the route (set in <b>Business setup</b>, on each warehouse or delivery site). If no price is set for the
+          route, it is the truck rate × quantity.
+        </P>
+        <H>New price or labour cost asked by loading staff</H>
+        <P>
+          Loading staff can ask for a different <b>price per truck</b> or <b>labour cost per truck</b> (your per-truck labour cost for the station or port, set in{' '}
+          <b>Business setup</b>) when they load. You get an alert, and the trip shows the request (all of them are in the <b>Needs approval</b> quick view on{' '}
+          <b>Truck trips</b>). <b>Approve new amount</b> to use it, or <b>Keep my rate</b> (reason needed). Until you decide, your amount is used. A truck payment
+          with a price waiting for approval cannot be marked paid.
         </P>
         <Table
           head={['Truck payment status', 'Meaning', 'Your buttons']}
@@ -564,7 +594,7 @@ export const HELP_SECTIONS = [
           customer for <b>Bills</b>, <b>Payments</b>, <b>Special permissions</b> and <b>Sites</b>. Bills are made by Feather when a delivery is received at the site.
         </P>
         <Bullets>
-          <><b>New customer</b>: leave limit and days blank to use the default. Then add their sites in Products & places.</>
+          <>To add a customer, go to <b>Setup → Business setup → Customers → New customer</b>. Leave limit and days blank to use the default, then add their sites in the <b>Places</b> tab.</>
           <><b>Record payment</b>: amount, date, cheque / UTR. Oldest bills are cleared first. Extra is kept as advance.</>
           <><b>Add bill</b>: for old amounts from your earlier books.</>
           <><b>Allow anyway</b> (only when on hold): let a set number of delivery notes go for a set time, with a reason. The block comes back by itself after that.</>
@@ -593,7 +623,36 @@ export const HELP_SECTIONS = [
             ['Deducted', 'Total money cut from their truck payment'],
           ]}
         />
-        <P>Below is <b>All truck companies</b>. Use <b>New truck company</b> or <b>Edit</b> for name, phone, GSTIN and usual truck rate.</P>
+        <P>
+          Below is <b>All truck companies</b>. Use <b>Edit</b> to change name, phone, GSTIN and usual truck rate. To add a truck company, go to{' '}
+          <b>Setup → Business setup → Truck companies → New truck company</b>.
+        </P>
+      </>
+    ),
+  },
+  {
+    id: 'owner-sellers',
+    group: 'owner',
+    title: 'Sellers: who you buy from',
+    roles: [OWNER],
+    keywords: 'sellers suppliers vendors buy purchase add new seller',
+    body: (
+      <>
+        <P>
+          Open <b>Money → Sellers</b>. The tiles at the top show <b>Total sellers</b>, how many are <b>Active</b> and <b>Off</b>, and how many were added in the last
+          30 days.
+        </P>
+        <P>To add a seller:</P>
+        <Steps>
+          <>Go to <b>Setup → Business setup → Sellers</b> and tap <b>New seller</b>.</>
+          <>Type the <b>Seller name</b>. Contact person, phone, email, GSTIN and address are optional.</>
+          <>Tap <b>Save</b>.</>
+        </Steps>
+        <P>
+          Use <b>Edit</b> to change a seller. Switch <b>Active</b> off for a seller you no longer buy from — they stay in the list for history. Use the <b>All / Active /
+          Off</b> buttons to filter the list.
+        </P>
+        <Note>Only you (the owner) can see and change sellers. Office and field staff cannot.</Note>
       </>
     ),
   },
@@ -647,13 +706,19 @@ export const HELP_SECTIONS = [
   {
     id: 'owner-setup',
     group: 'owner',
-    title: 'Products, places and staff',
+    title: 'Business setup and staff',
     roles: [OWNER],
-    keywords: 'materials places unloading point warehouse delivery site users role pin works at active your cost tolerance density',
+    keywords: 'business setup products materials places unloading point warehouse delivery site customers sellers truck companies add new users role pin works at active your cost tolerance density seller distance price per truck labour cost',
     body: (
       <>
+        <P>
+          <b>Setup → Business setup</b> is where you add and change everything your business works with. It has five tabs: <b>Products</b>, <b>Places</b>,{' '}
+          <b>Customers</b>, <b>Sellers</b> and <b>Truck companies</b>. The <b>New …</b> button at the top adds to the tab you are on; <b>Edit</b> on a row changes it.
+          The Money pages show the numbers for customers, sellers and truck companies.
+        </P>
         <H>Materials</H>
         <Bullets>
+          <><b>Seller name</b>: who you buy this product from, chosen from the <b>Sellers</b> tab. Every product needs one. Only you see it.</>
           <><b>Counted in</b>: Weight (MT) for sand, aggregate, soil, or Bags for cement. Cannot change later.</>
           <><b>Allowed road loss %</b>: for example 0.5 for wet sand. Blank uses the Settings default.</>
           <><b>Density</b>: tonnes per cubic metre, for brass ↔ MT.</>
@@ -664,6 +729,15 @@ export const HELP_SECTIONS = [
           Types: Railway station, Port, Warehouse, Delivery site. A delivery site must be linked to a customer. Set <b>Normal road time</b> for warehouses
           and sites. Slower trucks are flagged as delayed.
         </P>
+        <Bullets>
+          <>
+            <b>Distance from unloading points</b> (warehouses and delivery sites): one row per railway station or port — distance in km and your <b>price per
+            truck</b>. That price is the truck payment for trucks on that route.
+          </>
+          <>
+            <b>Unloading labour cost</b> (railway stations and ports): per wagon, per truck and per kg. Loading staff see the per-truck cost on each truck.
+          </>
+        </Bullets>
         <H>Staff</H>
         <Steps>
           <>Tap <b>New staff member</b> and choose the <b>Role</b>.</>

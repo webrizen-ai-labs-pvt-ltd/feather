@@ -8,6 +8,7 @@ import {
   formatVehicleNo,
   freightSettlement,
   loadingSchema,
+  noteSchema,
   reasonSchema,
   receiptSchema,
   ROLES,
@@ -15,6 +16,8 @@ import {
   TRIP_FLAGS,
   TRIP_SOURCE,
   TRIP_STATUS,
+  PRICE_REQUEST_KINDS,
+  PRICE_REQUEST_STATUS,
   tripCorrectionSchema,
 } from '@feather/shared';
 import { requireRole } from '@/middleware/auth.js';
@@ -26,7 +29,7 @@ import { audit } from '@/services/audit.js';
 import { nextNumber } from '@/services/counters.js';
 import { activeOverride, consumeOverride, customerCredit } from '@/services/credit.js';
 import { getSettings } from '@/services/settings.js';
-import { cancelTrip, correctTrip, createLoading, receiveTrip } from '@/services/trips.js';
+import { cancelTrip, correctTrip, createLoading, receiveTrip, reviewPriceRequest } from '@/services/trips.js';
 import { badRequest, escapeRegex, HttpError, notFound, pageParams } from '@/utils/http.js';
 import { presentTrip, presentTrips } from '@/utils/present.js';
 
@@ -43,6 +46,10 @@ const POPULATE = [
   { path: 'customer', select: 'name' },
   { path: 'consignment', select: 'referenceType referenceNo mode' },
   { path: 'order', select: 'orderNo ratePerUnit' },
+  ...Object.keys(PRICE_REQUEST_KINDS).flatMap((kind) => [
+    { path: `${kind}.requestedBy`, select: 'name' },
+    { path: `${kind}.reviewedBy`, select: 'name' },
+  ]),
 ];
 
 /** What each role is allowed to list. */
@@ -93,6 +100,13 @@ router.get('/', async (req, res) => {
   const filter = { ...scope(req.user) };
   if (q.status) filter.status = { $in: String(q.status).split(',') };
   if (q.freight) filter['freight.status'] = { $in: String(q.freight).split(',') };
+  for (const kind of Object.keys(PRICE_REQUEST_KINDS)) {
+    if (q[kind]) filter[`${kind}.status`] = { $in: String(q[kind]).split(',') };
+  }
+  // Any new rate waiting for the owner (price per truck or labour cost).
+  if (q.approval === 'pending') {
+    filter.$and = [{ $or: Object.keys(PRICE_REQUEST_KINDS).map((kind) => ({ [`${kind}.status`]: PRICE_REQUEST_STATUS.PENDING })) }];
+  }
   if (q.flagged === 'true') filter['flags.0'] = { $exists: true };
   if (q.flag) filter.flags = q.flag;
   for (const key of ['consignment', 'transporter', 'customer', 'destination', 'order', 'material']) {
@@ -206,7 +220,7 @@ router.patch('/:id/advance', office, validate(advanceSchema), async (req, res) =
   if (!trip) throw notFound('Trip');
   if (trip.freight.status === FREIGHT_STATUS.PAID) throw badRequest('Truck payment is already paid.');
   const before = trip.freight.advance;
-  Object.assign(trip.freight, freightSettlement({ loadedQty: trip.loading.qty, rate: trip.freight.rate, advance: req.valid.advance, deduction: trip.freight.deduction }));
+  Object.assign(trip.freight, freightSettlement({ loadedQty: trip.loading.qty, rate: trip.freight.rate, pricePerTruck: trip.freight.pricePerTruck, advance: req.valid.advance, deduction: trip.freight.deduction }));
   await trip.save();
   await audit(req, { action: 'trip.advance', entity: 'Trip', entityId: trip._id, before: { advance: before }, after: { advance: req.valid.advance } });
   await reply(res, trip, req.user);
@@ -234,7 +248,7 @@ router.post('/:id/freight/waive', ownerOnly, validate(reasonSchema), async (req,
   if (!trip) throw notFound('Trip');
   if (![FREIGHT_STATUS.LOCKED, FREIGHT_STATUS.READY].includes(trip.freight.status)) throw badRequest('Truck payment cannot be changed now.');
   const before = { deduction: trip.freight.deduction, status: trip.freight.status };
-  Object.assign(trip.freight, freightSettlement({ loadedQty: trip.loading.qty, rate: trip.freight.rate, advance: trip.freight.advance, deduction: 0 }));
+  Object.assign(trip.freight, freightSettlement({ loadedQty: trip.loading.qty, rate: trip.freight.rate, pricePerTruck: trip.freight.pricePerTruck, advance: trip.freight.advance, deduction: 0 }));
   Object.assign(trip.freight, { status: FREIGHT_STATUS.READY, waived: true, reviewedBy: req.user._id, reviewedAt: new Date(), reviewNote: req.valid.reason });
   await trip.save();
   await audit(req, { action: 'trip.freight_waive', entity: 'Trip', entityId: trip._id, reason: req.valid.reason, before, after: { deduction: 0 } });
@@ -245,12 +259,36 @@ router.post('/:id/freight/paid', ownerOnly, async (req, res) => {
   const trip = await Trip.findById(req.params.id);
   if (!trip) throw notFound('Trip');
   if (trip.freight.status !== FREIGHT_STATUS.READY) throw badRequest('Only cleared truck payment can be marked paid.');
+  if (trip.truckPrice?.status === PRICE_REQUEST_STATUS.PENDING) throw badRequest('Approve or reject the new truck price first.');
   trip.freight.status = FREIGHT_STATUS.PAID;
   trip.freight.paidAt = new Date();
   await trip.save();
   await audit(req, { action: 'trip.freight_paid', entity: 'Trip', entityId: trip._id, after: { balance: trip.freight.balance } });
   await reply(res, trip, req.user);
 });
+
+/**
+ * Loading staff asked for a different price per truck / labour cost. Only an approved amount is used.
+ * POST /:id/truck-price/approve|reject and /:id/labour-cost/approve|reject
+ */
+for (const [kind, { path }] of Object.entries(PRICE_REQUEST_KINDS)) {
+  const action = path.replaceAll('-', '_');
+  router.post(`/:id/${path}/approve`, ownerOnly, validate(noteSchema), async (req, res) => {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) throw notFound('Trip');
+    const before = { agreed: trip[kind]?.agreed, freightAmount: trip.freight.amount };
+    await reviewPriceRequest({ trip, kind, approve: true, note: req.valid.note, user: req.user });
+    await audit(req, { action: `trip.${action}_approve`, entity: 'Trip', entityId: trip._id, reason: req.valid.note, before, after: { agreed: trip[kind].agreed, freightAmount: trip.freight.amount } });
+    await reply(res, trip, req.user);
+  });
+  router.post(`/:id/${path}/reject`, ownerOnly, validate(reasonSchema), async (req, res) => {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) throw notFound('Trip');
+    await reviewPriceRequest({ trip, kind, approve: false, note: req.valid.reason, user: req.user });
+    await audit(req, { action: `trip.${action}_reject`, entity: 'Trip', entityId: trip._id, reason: req.valid.reason, after: { requested: trip[kind].requested, agreed: trip[kind].agreed } });
+    await reply(res, trip, req.user);
+  });
+}
 
 router.post('/:id/correct', ownerOnly, validate(tripCorrectionSchema), async (req, res) => {
   const trip = await Trip.findById(req.params.id);

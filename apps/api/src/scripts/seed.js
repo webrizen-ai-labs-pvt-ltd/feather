@@ -7,7 +7,7 @@ import bcrypt from 'bcryptjs';
 import { CONSIGNMENT_MODES, DEFAULT_SETTINGS, LOCATION_TYPES, MATERIAL_KINDS, ROLES } from '@feather/shared';
 import { connectDb, disconnectDb } from '@/config/db.js';
 import { env } from '@/config/env.js';
-import { Consignment, Customer, Location, Material, Setting, Transporter, User } from '@/models/index.js';
+import { Consignment, Customer, Location, Material, Seller, Setting, Transporter, User } from '@/models/index.js';
 
 const demo = process.argv.includes('--demo');
 
@@ -28,12 +28,14 @@ await upsert(Setting, { _id: 'global' }, DEFAULT_SETTINGS);
 
 if (demo) {
   console.log('Adding demo data…');
-  const opc = await upsert(Material, { name: 'OPC 53 Cement' }, { kind: MATERIAL_KINDS.BAGGED, bagWeightKg: 50, transitLossTolerancePct: 0.2, landedCostPerUnit: 360 });
-  await upsert(Material, { name: 'PPC Cement' }, { kind: MATERIAL_KINDS.BAGGED, bagWeightKg: 50, transitLossTolerancePct: 0.2, landedCostPerUnit: 330 });
-  await upsert(Material, { name: 'Slag Cement' }, { kind: MATERIAL_KINDS.BAGGED, bagWeightKg: 50, transitLossTolerancePct: 0.2, landedCostPerUnit: 310 });
-  const sand = await upsert(Material, { name: 'River Sand' }, { kind: MATERIAL_KINDS.BULK, transitLossTolerancePct: 0.5, densityTPerM3: 1.6, landedCostPerUnit: 1100 });
-  const agg = await upsert(Material, { name: 'Crushed Aggregate 20mm' }, { kind: MATERIAL_KINDS.BULK, transitLossTolerancePct: 0.3, densityTPerM3: 1.5, landedCostPerUnit: 950 });
-  await upsert(Material, { name: 'Backfill Soil' }, { kind: MATERIAL_KINDS.BULK, transitLossTolerancePct: 1, densityTPerM3: 1.4, landedCostPerUnit: 300 });
+  const cementCo = await upsert(Seller, { name: 'Demo Cement Works' }, { contactPerson: 'Sales desk', phone: '9833300001' });
+  const quarry = await upsert(Seller, { name: 'Demo Quarry Ltd' }, { contactPerson: 'Dispatch office', phone: '9833300002' });
+  const opc = await upsert(Material, { name: 'OPC 53 Cement' }, { kind: MATERIAL_KINDS.BAGGED, bagWeightKg: 50, transitLossTolerancePct: 0.2, landedCostPerUnit: 360, seller: cementCo._id });
+  await upsert(Material, { name: 'PPC Cement' }, { kind: MATERIAL_KINDS.BAGGED, bagWeightKg: 50, transitLossTolerancePct: 0.2, landedCostPerUnit: 330, seller: cementCo._id });
+  await upsert(Material, { name: 'Slag Cement' }, { kind: MATERIAL_KINDS.BAGGED, bagWeightKg: 50, transitLossTolerancePct: 0.2, landedCostPerUnit: 310, seller: cementCo._id });
+  const sand = await upsert(Material, { name: 'River Sand' }, { kind: MATERIAL_KINDS.BULK, transitLossTolerancePct: 0.5, densityTPerM3: 1.6, landedCostPerUnit: 1100, seller: quarry._id });
+  const agg = await upsert(Material, { name: 'Crushed Aggregate 20mm' }, { kind: MATERIAL_KINDS.BULK, transitLossTolerancePct: 0.3, densityTPerM3: 1.5, landedCostPerUnit: 950, seller: quarry._id });
+  await upsert(Material, { name: 'Backfill Soil' }, { kind: MATERIAL_KINDS.BULK, transitLossTolerancePct: 1, densityTPerM3: 1.4, landedCostPerUnit: 300, seller: quarry._id });
 
   const siding = await upsert(Location, { name: 'Main Rail Siding', type: LOCATION_TYPES.SIDING }, { address: 'Goods shed, platform 3' });
   await upsert(Location, { name: 'River Wharf', type: LOCATION_TYPES.PORT }, {});
@@ -54,12 +56,12 @@ if (demo) {
   await upsert(
     Consignment,
     { referenceType: 'RR', referenceNo: 'RR-DEMO-0001' },
-    { mode: CONSIGNMENT_MODES.RAIL_RAKE, supplier: 'Demo Quarry Ltd', material: agg._id, unit: 'MT', location: siding._id, declaredQty: 3200, wagonCount: 58, freeTimeHours: 7, demurrageRatePerWagonHour: 150, purchaseRatePerUnit: 700, freightRatePerUnit: 180 },
+    { mode: CONSIGNMENT_MODES.RAIL_RAKE, seller: quarry._id, supplier: 'Demo Quarry Ltd', material: agg._id, unit: 'MT', location: siding._id, declaredQty: 3200, paperQty: 3200, declaredUnit: 'tons', wagonCount: 58, freeTimeHours: 9, demurrageBasis: 'hour', demurrageRate: 150, purchaseAmount: 2240000, purchaseRatePerUnit: 700 },
   );
   await upsert(
     Consignment,
     { referenceType: 'RR', referenceNo: 'RR-DEMO-0002' },
-    { mode: CONSIGNMENT_MODES.RAIL_RAKE, supplier: 'Demo Cement Works', material: opc._id, unit: 'bag', location: siding._id, declaredQty: 50000, wagonCount: 42, freeTimeHours: 9, demurrageRatePerWagonHour: 150, purchaseRatePerUnit: 320, freightRatePerUnit: 8 },
+    { mode: CONSIGNMENT_MODES.RAIL_RAKE, seller: cementCo._id, supplier: 'Demo Cement Works', material: opc._id, unit: 'bag', location: siding._id, declaredQty: 50000, paperQty: 50000, declaredUnit: 'pieces', wagonCount: 42, freeTimeHours: 9, demurrageBasis: 'hour', demurrageRate: 150, purchaseAmount: 16000000, purchaseRatePerUnit: 320 },
   );
   void sand;
   console.log('\nDemo logins (Operations app):');
