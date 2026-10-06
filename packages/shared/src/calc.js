@@ -216,6 +216,9 @@ export function demurrage({
     projectedFinishAt,
     projectedOverHours: overHours === null ? null : round(overHours, 2),
     projectedPenalty: penalty,
+    // Late charges so far: from the end of free hours until now (or until emptied), on all wagons.
+    accruedOverHours: round(Math.max(0, elapsedHours - freeTimeHours), 2),
+    accruedPenalty: lateFee({ overHours: Math.max(0, elapsedHours - freeTimeHours), rate: rate ?? ratePerWagonHour, basis, wagonCount }),
     isFinal: Boolean(releasedAt),
   };
 }
@@ -236,6 +239,107 @@ export const AGING_BUCKETS = Object.freeze([
 ]);
 
 export const daysSince = (date, now = new Date()) => Math.floor((new Date(now) - new Date(date)) / 86_400_000);
+
+// ---------- Stock lots (one lot = the stock from one shipment at one warehouse) ----------
+
+/** Lot key for stock that came in before shipment tracking, or with no shipment. */
+export const NO_LOT = 'none';
+
+/** Age buckets for stock (days since manufacturing). */
+export const STOCK_AGE_BUCKETS = Object.freeze([
+  { key: 'a0_30', label: '0–30 days', min: 0, max: 30 },
+  { key: 'a31_60', label: '31–60 days', min: 31, max: 60 },
+  { key: 'a61_90', label: '61–90 days', min: 61, max: 90 },
+  { key: 'a90_plus', label: 'Over 90 days', min: 91, max: Infinity },
+]);
+
+export const stockAgeBucket = (ageDays) => STOCK_AGE_BUCKETS.find((b) => ageDays >= b.min && ageDays <= b.max) ?? STOCK_AGE_BUCKETS[0];
+
+/** Calendar day in India time as a day number (days since 1970-01-01). A date-only value (midnight UTC) keeps its own date. */
+export const istDayNumber = (value) => Math.floor((new Date(value).getTime() + 330 * 60_000) / 86_400_000);
+
+/**
+ * Shelf life of a lot, in whole calendar days (India time) from startedOn — the date of manufacturing
+ * (or the arrival date when no manufacturing date was entered). Day of manufacturing = day 0.
+ * status: fresh / soon (use first) / expired, or none when the material has no shelf life
+ * (sand, aggregate) or the start date is unknown.
+ */
+export function shelfLife({ startedOn, shelfLifeDays, warnDays = 0, now = new Date() }) {
+  if (!startedOn) return { ageDays: null, daysLeft: null, expiresAt: null, status: 'none' };
+  const startDay = istDayNumber(startedOn);
+  const ageDays = Math.max(0, istDayNumber(now) - startDay);
+  if (!shelfLifeDays) return { ageDays, daysLeft: null, expiresAt: null, status: 'none' };
+  const daysLeft = shelfLifeDays - ageDays;
+  // Last good day, as a date (midnight UTC = that calendar day).
+  const expiresAt = new Date((startDay + shelfLifeDays) * 86_400_000);
+  const status = daysLeft < 0 ? 'expired' : daysLeft <= warnDays ? 'soon' : 'fresh';
+  return { ageDays, daysLeft, expiresAt, status };
+}
+
+/** ddmmyyyy of a moment in India time, e.g. 04102026. */
+export function istDayCode(value) {
+  const d = new Date(new Date(value).getTime() + 330 * 60_000);
+  return `${String(d.getUTCDate()).padStart(2, '0')}${String(d.getUTCMonth() + 1).padStart(2, '0')}${d.getUTCFullYear()}`;
+}
+
+/** Stock ID: day the stock arrived at the warehouse (India time) + running number for that day, e.g. 04102026-02. */
+export const stockIdFor = (arrivedAt, seq) => `${istDayCode(arrivedAt)}-${String(seq).padStart(2, '0')}`;
+
+const arrivalTime = (lot) => (lot.arrivedAt ? new Date(lot.arrivedAt).getTime() : 0);
+
+/** Oldest first (by arrivedAt = the lot's shelf-life start date). Lots with no date (stock from before tracking) go first. */
+export const fifoOrder = (lots) => [...lots].sort((a, b) => arrivalTime(a) - arrivalTime(b) || String(a.key).localeCompare(String(b.key)));
+
+/**
+ * Takes qty from lots in the order given (call fifoOrder first).
+ * lots = [{ key, qty }]. Returns { takes: [{ key, qty }], short } — short = what the lots could not cover.
+ */
+export function takeFifo(lots, qty) {
+  let left = round(qty);
+  const takes = [];
+  for (const lot of lots) {
+    if (left <= 0) break;
+    if (!(lot.qty > 0)) continue;
+    const take = round(Math.min(lot.qty, left));
+    takes.push({ key: lot.key, qty: take });
+    left = round(left - take);
+  }
+  return { takes, short: left > 0 ? left : 0 };
+}
+
+/**
+ * Balance per lot, oldest first. lots = [{ key, qty, arrivedAt }] with qty = sum of rows marked with that lot.
+ * untaggedQty = rows from before lot tracking that carry no lot: a shortfall is taken from the oldest lots,
+ * extra goes to the NO_LOT lot. Anything no lot can cover stays as a negative NO_LOT balance, so the total
+ * always equals system stock.
+ */
+export function settleLots(lots, untaggedQty = 0) {
+  const out = fifoOrder(lots).map((l) => ({ ...l, qty: round(l.qty) }));
+  const noLot = () => {
+    let l = out.find((x) => x.key === NO_LOT);
+    if (!l) {
+      l = { key: NO_LOT, qty: 0, arrivedAt: null };
+      out.unshift(l);
+    }
+    return l;
+  };
+  let deficit = 0;
+  for (const l of out) {
+    if (l.qty < 0) {
+      deficit += -l.qty;
+      l.qty = 0;
+    }
+  }
+  if (untaggedQty < 0) deficit += -untaggedQty;
+  else if (untaggedQty > 0) noLot().qty = round(noLot().qty + untaggedQty);
+  const { takes, short } = takeFifo(out, round(deficit));
+  for (const t of takes) {
+    const l = out.find((x) => x.key === t.key);
+    l.qty = round(l.qty - t.qty);
+  }
+  if (short > 0) noLot().qty = round(noLot().qty - short);
+  return out;
+}
 
 export function aging(invoices, now = new Date()) {
   const buckets = Object.fromEntries(AGING_BUCKETS.map((b) => [b.key, 0]));

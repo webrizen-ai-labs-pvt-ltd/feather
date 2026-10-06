@@ -169,14 +169,27 @@ export const consignmentSchema = z
     demurrageRate: optional(nonNegative('Late fee amount')),
     /** Total amount on the seller's bill for this shipment (owner only). */
     purchaseAmount: optional(nonNegative('Total billing amount')),
+    /** Seller's invoice number for this shipment (owner only). */
+    invoiceNo: optional(z.string().trim().max(60, 'Invoice number is too long')),
     /** Not on the form any more (price per truck / truck company rate is used); kept for older API callers. */
     freightRatePerUnit: optional(nonNegative('Truck rate')),
+    /** Date the material was manufactured (from the seller's bill or the bag print). */
+    manufacturedAt: optional(z.coerce.date({ error: 'Enter a correct date' })),
     expectedAt: optional(z.coerce.date()),
     notes: optional(z.string().trim()),
   })
   .refine((v) => v.mode !== CONSIGNMENT_MODES.RAIL_RAKE || v.wagonCount > 0, {
     path: ['wagonCount'],
     message: 'Enter the number of wagons',
+  })
+  // Compared by day (India time for "today"): made on the day it arrives, or today, is fine.
+  .refine((v) => !v.manufacturedAt || v.manufacturedAt.toISOString().slice(0, 10) <= new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10), {
+    path: ['manufacturedAt'],
+    message: 'Date of manufacturing cannot be in the future',
+  })
+  .refine((v) => !v.manufacturedAt || !v.expectedAt || v.manufacturedAt.toISOString().slice(0, 10) <= v.expectedAt.toISOString().slice(0, 10), {
+    path: ['manufacturedAt'],
+    message: 'Date of manufacturing cannot be after the expected arrival',
   });
 
 // ---------- Trips ----------
@@ -286,6 +299,14 @@ export const advanceSchema = z.object({ advance: nonNegative('Advance') });
 
 export const noteSchema = z.object({ note: optional(z.string().trim().max(500)) });
 
+/** Loading staff mark a train wagon fully empty (or undo a wrong tap). */
+export const wagonMarkSchema = z.object({
+  no: num('Wagon number').refine((v) => Number.isInteger(v) && v >= 1, 'Wagon number must be 1 or more'),
+  emptied: z.preprocess((v) => v === true || v === 'true', z.boolean()),
+  deviceTime: optional(z.coerce.date()),
+  wasOffline: z.preprocess((v) => v === true || v === 'true', z.boolean()).default(false),
+});
+
 /** Fields sent with an uploaded document (the file itself comes as multipart "file"). */
 export const documentUploadSchema = z.object({
   kind: z.preprocess(blankToUndefined, z.enum(Object.values(DOCUMENT_KINDS)).default(DOCUMENT_KINDS.OTHER)),
@@ -340,6 +361,8 @@ export const settingsSchema = z.object({
   chargeBurstLossToTransporter: z.boolean(),
   demurrageWarnHours: nonNegative('Warn hours'),
   stockMismatchPct: nonNegative('Stock mismatch'),
+  shelfLifeDays: wholeCount('Shelf life'),
+  shelfLifeWarnDays: wholeCount('Use-first warning'),
   alertEmails: z.array(z.email()).default([]),
 });
 

@@ -23,11 +23,13 @@ export function presentConsignment(doc, role) {
   if (!canSeePurchasePrices(role)) {
     delete c.purchaseRatePerUnit;
     delete c.purchaseAmount;
+    delete c.invoiceNo;
     delete c.seller;
     delete c.supplier;
   }
-  if (!canSeeMoney(role)) {
-    delete c.freightRatePerUnit;
+  if (!canSeeMoney(role)) delete c.freightRatePerUnit;
+  // Late charges: loading staff see them on the timer card (they can speed up unloading); receiving staff do not.
+  if (!canSeeLoadingCosts(role)) {
     delete c.demurrageRatePerWagonHour;
     delete c.demurrageRate;
     if (c.demurrage) delete c.demurrage.finalPenalty;

@@ -41,7 +41,7 @@ import { raiseAlert } from '@/services/alerts.js';
 import { nextNumber } from '@/services/counters.js';
 import { activeOverride, applyAdvances, consumeOverride, customerCredit } from '@/services/credit.js';
 import { getSettings } from '@/services/settings.js';
-import { bookQty, move } from '@/services/stock.js';
+import { bookQty, issueFifo, move, returnToLots } from '@/services/stock.js';
 import { putFile } from '@/services/storage.js';
 import { badRequest, forbidden, HttpError, notFound } from '@/utils/http.js';
 
@@ -98,6 +98,10 @@ export async function createLoading({ input, file, user }) {
   if (input.consignment) {
     consignment = await Consignment.findById(input.consignment);
     if (!consignment) throw notFound('Shipment');
+    // Loading only from a shipment that has arrived (marked "arrived" on the Shipments screen).
+    if (consignment.status === CONSIGNMENT_STATUS.EXPECTED) {
+      throw badRequest('This shipment has not arrived yet. Mark it as arrived on the Shipments screen first.', { fields: { consignment: 'Not arrived yet' } });
+    }
     if ([CONSIGNMENT_STATUS.RELEASED, CONSIGNMENT_STATUS.CLOSED].includes(consignment.status)) {
       throw badRequest('This shipment is already finished. You cannot load from it.');
     }
@@ -244,14 +248,10 @@ export async function createLoading({ input, file, user }) {
 
   // --- Running totals and stock
   if (consignment) {
-    const update = { $inc: { tripCount: 1, liftedQty: qty } };
-    if (consignment.status === CONSIGNMENT_STATUS.EXPECTED) {
-      // Loading has started, so the rake is at the siding. Start the clock now.
-      update.$set = { status: CONSIGNMENT_STATUS.PLACED, placedAt: consignment.placedAt ?? now };
-    }
-    await Consignment.updateOne({ _id: consignment._id }, update);
+    await Consignment.updateOne({ _id: consignment._id }, { $inc: { tripCount: 1, liftedQty: qty } });
   } else {
-    await move({ location: sourceLocation, material: material._id, unit: material.unit, qty: -qty, reason: 'dispatch', trip: trip._id, by: user._id });
+    // First in, first out: the oldest shipment in the warehouse goes first.
+    await issueFifo({ location: sourceLocation, material: material._id, unit: material.unit, qty, reason: 'dispatch', trip: trip._id, by: user._id });
   }
   if (order) await Order.updateOne({ _id: order._id }, { $inc: { dispatchedQty: qty } });
   await Vehicle.updateOne(
@@ -537,7 +537,7 @@ export async function receiveTrip({ tripId, input, file, user }) {
   // Stock goes up only when a truck is received at our own yard.
   if (destination.type === LOCATION_TYPES.STOCKYARD) {
     for (const line of result.stockLines) {
-      await move({ location: destination._id, material: material._id, unit: material.unit, grade: line.grade, qty: line.qty, reason: 'receipt', trip: trip._id, by: user._id });
+      await move({ location: destination._id, material: material._id, unit: material.unit, grade: line.grade, qty: line.qty, reason: 'receipt', lot: trip.consignment ?? null, trip: trip._id, by: user._id });
     }
   }
   if (order) {
@@ -612,7 +612,11 @@ export async function correctTrip({ trip, input, user }) {
     Object.assign(trip.loading, { method: WEIGH_METHODS.WEIGHT, gross, tare, net, qty: isBagged ? trip.loading.qty : net });
     if (qtyDiff) {
       if (trip.consignment) await Consignment.updateOne({ _id: trip.consignment }, { $inc: { liftedQty: qtyDiff, ...(trip.status === TRIP_STATUS.RECEIVED ? { receivedLoadedQty: qtyDiff } : {}) } });
-      else await move({ location: trip.sourceLocation, material: material._id, unit: material.unit, qty: -qtyDiff, reason: 'correction', trip: trip._id, by: user._id });
+      else {
+        const stock = { location: trip.sourceLocation, material: material._id, unit: material.unit, reason: 'correction', trip: trip._id, by: user._id };
+        if (qtyDiff > 0) await issueFifo({ ...stock, qty: qtyDiff });
+        else await returnToLots({ ...stock, qty: -qtyDiff });
+      }
       if (order) await Order.updateOne({ _id: order._id }, { $inc: { dispatchedQty: qtyDiff } });
     }
     Object.assign(trip.freight, freightSettlement({ loadedQty: trip.loading.qty, rate: trip.freight.rate, pricePerTruck: trip.freight.pricePerTruck, advance: trip.freight.advance, deduction: trip.freight.deduction }));
@@ -638,7 +642,7 @@ export async function correctTrip({ trip, input, user }) {
     });
     const qtyDiff = round(result.receipt.qty - trip.receipt.qty);
     if (qtyDiff && destination.type === LOCATION_TYPES.STOCKYARD && !isBagged) {
-      await move({ location: destination._id, material: material._id, unit: material.unit, qty: qtyDiff, reason: 'correction', trip: trip._id, by: user._id });
+      await move({ location: destination._id, material: material._id, unit: material.unit, qty: qtyDiff, reason: 'correction', lot: trip.consignment ?? null, trip: trip._id, by: user._id });
     }
     if (qtyDiff && trip.consignment) await Consignment.updateOne({ _id: trip.consignment }, { $inc: { receivedQty: qtyDiff } });
     if (order && !isBagged) {
@@ -668,7 +672,8 @@ export async function cancelTrip({ trip, reason, user }) {
   trip.freight.status = FREIGHT_STATUS.ON_HOLD;
   await trip.save();
   if (trip.consignment) await Consignment.updateOne({ _id: trip.consignment }, { $inc: { tripCount: -1, liftedQty: -trip.loading.qty } });
-  else await move({ location: trip.sourceLocation, material: material._id, unit: material.unit, qty: trip.loading.qty, reason: 'cancel', trip: trip._id, by: user._id });
+  // Stock goes back into the same shipment lots it was taken from.
+  else await returnToLots({ trip: trip._id, location: trip.sourceLocation, material: material._id, unit: material.unit, reason: 'cancel', by: user._id });
   if (trip.order) await Order.updateOne({ _id: trip.order }, { $inc: { dispatchedQty: -trip.loading.qty } });
   return trip;
 }

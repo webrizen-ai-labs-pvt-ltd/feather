@@ -22,6 +22,17 @@ const consignmentSchema = new Schema(
     paperQty: Number,
     declaredUnit: { type: String, enum: Object.values(PAPER_UNITS) },
     wagonCount: { type: Number, default: 0 },
+    /** Train: wagons marked fully empty by loading staff (wagon number 1…wagonCount). */
+    wagonsEmptied: [
+      {
+        _id: false,
+        no: { type: Number, required: true },
+        at: Date, // server time
+        deviceTime: Date,
+        wasOffline: Boolean,
+        by: { type: Schema.Types.ObjectId, ref: 'User' },
+      },
+    ],
     freeTimeHours: { type: Number, required: true },
     /** Late fee after free hours: per hour / per day / one time, × wagons for a train. */
     demurrageBasis: { type: String, enum: Object.values(LATE_FEE_BASIS), default: LATE_FEE_BASIS.HOUR },
@@ -30,6 +41,10 @@ const consignmentSchema = new Schema(
     demurrageRatePerWagonHour: { type: Number, default: 0 },
     /** Total on the seller's bill (owner only). purchaseRatePerUnit is worked out from it. */
     purchaseAmount: Number,
+    /** Seller's invoice number (owner only). */
+    invoiceNo: { type: String, trim: true },
+    /** Date the material was manufactured. */
+    manufacturedAt: Date,
     purchaseRatePerUnit: { type: Number, default: 0 }, // owner only
     freightRatePerUnit: Number, // older shipments: road freight per unit for child trips
     expectedAt: Date,

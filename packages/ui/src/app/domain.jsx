@@ -8,6 +8,8 @@ import {
   formatHours,
   formatINR,
   formatQty,
+  lateFee,
+  lateFeeTerms,
   TRIP_FLAG_LABELS,
   TRIP_STATUS_LABELS,
 } from '@feather/shared';
@@ -155,6 +157,7 @@ export function DemurrageClock({ consignment, showMoney = false, className }) {
   const pct = c.declaredQty ? (c.liftedQty / c.declaredQty) * 100 : 0;
   const tone = CLOCK_TONE[clock.status] ?? 'neutral';
   const meter = tone === 'bad' ? 'bad' : tone === 'warn' ? 'warn' : 'good';
+  const late = lateChargesNow(c);
 
   return (
     <div className={cx('@container rounded-xl bg-primary p-5 shadow-xs ring-1 ring-secondary', className)}>
@@ -172,14 +175,15 @@ export function DemurrageClock({ consignment, showMoney = false, className }) {
       </div>
 
       {clock.status === 'not_placed' ? (
-        <p className="mt-4 text-sm text-tertiary">The timer starts when the shipment arrives or the first truck is loaded.</p>
+        <p className="mt-4 text-sm text-tertiary">The timer starts when the shipment is marked as arrived.</p>
       ) : (
         <>
-          <div className="mt-5 grid grid-cols-2 gap-4 @lg:grid-cols-4">
+          <div className="mt-5 grid grid-cols-2 gap-4 @lg:grid-cols-5">
             <Figure label="Free hours left" value={formatHours(clock.remainingFreeHours)} bad={clock.remainingFreeHours < 0} icon />
             <Figure label="Still to unload" value={formatQty(clock.remainingQty, unit)} />
             <Figure label="Speed now / hr" value={formatQty(clock.liftRatePerHour, unit)} />
             <Figure label="Speed needed / hr" value={clock.requiredRatePerHour === null ? '—' : formatQty(clock.requiredRatePerHour, unit)} bad={clock.requiredRatePerHour > clock.liftRatePerHour} />
+            {late && <Figure label="Late charges" value={formatINR(late.amount)} sub={late.sub} bad={late.amount > 0} />}
           </div>
           <div className="mt-5">
             <div className="mb-2 flex flex-wrap justify-between gap-2 text-sm">
@@ -202,7 +206,7 @@ export function DemurrageClock({ consignment, showMoney = false, className }) {
   );
 }
 
-function Figure({ label, value, bad, icon }) {
+function Figure({ label, value, bad, icon, sub }) {
   return (
     <div>
       <p className="flex items-center gap-1 text-xs font-medium text-tertiary">
@@ -210,8 +214,28 @@ function Figure({ label, value, bad, icon }) {
         {label}
       </p>
       <p className={cx('mt-1 text-lg font-semibold tabular-nums', bad ? 'text-error-primary' : 'text-primary')}>{value}</p>
+      {sub && <p className="text-xs text-tertiary">{sub}</p>}
     </div>
   );
+}
+
+/**
+ * Late charges so far, worked out on the phone so it counts up live: after free hours end,
+ * the rate × ALL wagons (even if only one still has material) for each started hour / day.
+ * null when this viewer does not get the rate (receiving staff) or no rate is set.
+ */
+function lateChargesNow(c) {
+  const { basis, rate } = lateFeeTerms(c);
+  if (c.demurrageRate === undefined && c.demurrageRatePerWagonHour === undefined) return null;
+  if (!rate || !c.placedAt) return null;
+  const end = c.releasedAt ? new Date(c.releasedAt) : new Date();
+  const overHours = Math.max(0, (end - new Date(c.placedAt)) / 3_600_000 - c.freeTimeHours);
+  const per = { hour: 'per hour', day: 'per day', once: 'one time' }[basis];
+  const wagons = c.wagonCount > 0 ? ` × ${c.wagonCount} wagons` : '';
+  return {
+    amount: lateFee({ overHours, rate, basis, wagonCount: c.wagonCount }),
+    sub: overHours > 0 ? `${formatHours(overHours)} late · ${formatINR(rate)}${wagons} ${per}` : `Starts after free hours · ${formatINR(rate)}${wagons} ${per}`,
+  };
 }
 
 export function useOnline() {

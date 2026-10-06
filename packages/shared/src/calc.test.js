@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { agreedPrice, bagDebit, bagsToTons, creditCheck, demurrage, freightSettlement, lateFee, lateFeeTerms, netWeight, paperQtyToUnit, reconcileBags, routeFrom, transitLoss } from './calc.js';
+import { agreedPrice, fifoOrder, istDayCode, istDayNumber, stockIdFor, NO_LOT, settleLots, shelfLife, stockAgeBucket, takeFifo, bagDebit, bagsToTons, creditCheck, demurrage, freightSettlement, lateFee, lateFeeTerms, netWeight, paperQtyToUnit, reconcileBags, routeFrom, transitLoss } from './calc.js';
 
 test('net weight from slip', () => {
   assert.equal(netWeight(42.5, 14.0), 28.5);
@@ -83,6 +83,19 @@ test('route lookup by unloading point', () => {
   assert.equal(routeFrom(null, 'stn1'), null);
 });
 
+test('late charges so far: all wagons, each started hour after free hours', () => {
+  const placedAt = new Date('2026-10-04T00:00:00Z');
+  const base = { placedAt, freeTimeHours: 9, wagonCount: 11, rate: 150, basis: 'hour', declaredQty: 3000, liftedQty: 2900 };
+  // Still inside free hours → nothing yet
+  assert.equal(demurrage({ ...base, now: new Date('2026-10-04T08:00:00Z') }).accruedPenalty, 0);
+  // 2 h 10 min over → 3 started hours × 11 wagons × ₹150, even though only one wagon still has material
+  const late = demurrage({ ...base, now: new Date('2026-10-04T11:10:00Z') });
+  assert.equal(late.accruedPenalty, 3 * 11 * 150);
+  assert.equal(late.accruedOverHours, 2.17);
+  // Once emptied, it stops at the release time
+  assert.equal(demurrage({ ...base, releasedAt: new Date('2026-10-04T10:30:00Z'), now: new Date('2026-10-05T00:00:00Z') }).accruedPenalty, 2 * 11 * 150);
+});
+
 test('demurrage projects penalty at slow lifting rate', () => {
   const placedAt = new Date('2026-09-25T00:00:00Z');
   const now = new Date('2026-09-25T04:00:00Z');
@@ -135,4 +148,67 @@ test('credit check blocks on overdue invoice', () => {
     now,
   });
   assert.deepEqual(r.reasons, ['overdue']);
+});
+
+test('shelf life of a stock lot, from the date of manufacturing', () => {
+  // 4 Oct 2026, 3 pm India time.
+  const now = new Date('2026-10-04T09:30:00Z');
+  const fresh = shelfLife({ startedOn: new Date('2026-09-01'), shelfLifeDays: 90, warnDays: 15, now });
+  assert.equal(fresh.ageDays, 33);
+  assert.equal(fresh.daysLeft, 57);
+  assert.equal(fresh.status, 'fresh');
+  assert.equal(fresh.expiresAt.toISOString().slice(0, 10), '2026-11-30');
+  assert.equal(shelfLife({ startedOn: new Date('2026-07-15'), shelfLifeDays: 90, warnDays: 15, now }).status, 'soon');
+  const last = shelfLife({ startedOn: new Date('2026-07-06'), shelfLifeDays: 90, warnDays: 15, now });
+  assert.equal(last.daysLeft, 0);
+  assert.equal(last.status, 'soon');
+  assert.equal(shelfLife({ startedOn: new Date('2026-07-05'), shelfLifeDays: 90, warnDays: 15, now }).status, 'expired');
+  assert.equal(shelfLife({ startedOn: new Date('2026-01-01'), shelfLifeDays: 0, now }).status, 'none');
+  assert.equal(shelfLife({ startedOn: null, shelfLifeDays: 90, now }).status, 'none');
+  // Calendar days in India time: made yesterday is 1 day old just after midnight IST.
+  assert.equal(shelfLife({ startedOn: new Date('2026-10-03'), shelfLifeDays: 90, now: new Date('2026-10-03T18:31:00Z') }).ageDays, 1);
+  assert.equal(shelfLife({ startedOn: new Date('2026-10-03'), shelfLifeDays: 90, now: new Date('2026-10-03T18:29:00Z') }).ageDays, 0);
+  // An arrival time late in the evening still counts as that day.
+  assert.equal(istDayNumber('2026-10-03T17:00:00Z'), istDayNumber(new Date('2026-10-03')));
+  assert.equal(stockAgeBucket(0).key, 'a0_30');
+  assert.equal(stockAgeBucket(90).key, 'a61_90');
+  assert.equal(stockAgeBucket(91).key, 'a90_plus');
+});
+
+test('first in, first out', () => {
+  const lots = fifoOrder([
+    { key: 'B', qty: 300, arrivedAt: '2026-09-10' },
+    { key: 'A', qty: 100, arrivedAt: '2026-08-01' },
+    { key: NO_LOT, qty: 20, arrivedAt: null },
+  ]);
+  assert.deepEqual(lots.map((l) => l.key), [NO_LOT, 'A', 'B']);
+  assert.deepEqual(takeFifo(lots, 150), { takes: [{ key: NO_LOT, qty: 20 }, { key: 'A', qty: 100 }, { key: 'B', qty: 30 }], short: 0 });
+  assert.deepEqual(takeFifo(lots, 500).short, 80);
+  assert.deepEqual(takeFifo([{ key: 'A', qty: 0 }, { key: 'B', qty: 5 }], 3).takes, [{ key: 'B', qty: 3 }]);
+});
+
+test('lot balances with stock from before lot tracking', () => {
+  const lots = [
+    { key: 'A', qty: 100, arrivedAt: '2026-08-01' },
+    { key: 'B', qty: 300, arrivedAt: '2026-09-10' },
+  ];
+  // Old dispatches with no lot come out of the oldest shipment first.
+  assert.deepEqual(settleLots(lots, -130).map((l) => [l.key, l.qty]), [['A', 0], ['B', 270]]);
+  // Old extra stock with no lot is kept as its own lot.
+  assert.deepEqual(settleLots(lots, 40).map((l) => [l.key, l.qty]), [[NO_LOT, 40], ['A', 100], ['B', 300]]);
+  // A lot pushed below zero borrows from the oldest lot; the total never changes.
+  const neg = settleLots([{ key: 'A', qty: 50, arrivedAt: '2026-08-01' }, { key: 'B', qty: -10, arrivedAt: '2026-09-10' }]);
+  assert.deepEqual(neg.map((l) => [l.key, l.qty]), [['A', 40], ['B', 0]]);
+  // More taken out than ever came in: shows as negative stock with no lot.
+  const over = settleLots([{ key: 'A', qty: 10, arrivedAt: '2026-08-01' }], -25);
+  assert.deepEqual(over.map((l) => [l.key, l.qty]), [[NO_LOT, -15], ['A', 0]]);
+});
+
+test('stock ID: arrival day in India time + running number', () => {
+  assert.equal(stockIdFor('2026-10-04T05:00:00Z', 1), '04102026-01');
+  assert.equal(stockIdFor('2026-10-04T05:00:00Z', 12), '04102026-12');
+  assert.equal(stockIdFor('2026-10-04T05:00:00Z', 105), '04102026-105');
+  // 11:45 pm on 3 Oct UTC is already 4 Oct in India.
+  assert.equal(istDayCode('2026-10-03T18:45:00Z'), '04102026');
+  assert.equal(istDayCode('2026-10-03T18:15:00Z'), '03102026');
 });

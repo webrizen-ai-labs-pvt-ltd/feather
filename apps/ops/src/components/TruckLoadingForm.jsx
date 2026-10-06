@@ -1,12 +1,14 @@
-import { Send01, SlashCircle01, Truck01 } from '@untitledui/icons';
+import { Archive, Send01, SlashCircle01, Truck01 } from '@untitledui/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { Form } from 'react-aria-components';
+import { Link as AriaLink, Form } from 'react-aria-components';
 import {
   CREDIT_REASON_LABELS,
   fieldErrors,
+  formatDate,
   formatINR,
   formatNumber,
+  formatQty,
   formatVehicleNo,
   loadingSchema,
   LOCATION_TYPE_LABELS,
@@ -63,7 +65,8 @@ export default function TruckLoadingForm({ source }) {
   const [done, setDone] = useState(null);
 
   const fromRake = source === 'rake';
-  const { data: rakes } = useCachedGet(fromRake ? '/consignments' : null, { status: 'expected,placed' });
+  // Only shipments that have arrived can be loaded from (not those still on the way).
+  const { data: rakes } = useCachedGet(fromRake ? '/consignments' : null, { status: 'placed' });
   const { data: yards } = useCachedGet(fromRake ? null : '/masters/locations', { type: 'stockyard' });
   const { data: places } = useCachedGet('/masters/locations', { type: 'stockyard,customer_site' });
   const { data: transporters } = useCachedGet('/masters/transporters');
@@ -75,6 +78,9 @@ export default function TruckLoadingForm({ source }) {
   const toCustomer = destination?.type === LOCATION_TYPES.CUSTOMER_SITE;
   const order = orders?.items.find((o) => o._id === v.order);
   const materialId = rake?.material?._id ?? order?.material?._id;
+  // First in, first out: which shipment's stock to load from this warehouse.
+  const { data: fifo } = useCachedGet(!fromRake && v.sourceLocation && materialId ? '/stock/fifo-next' : null, { location: v.sourceLocation, material: materialId });
+  const fifoNext = fifo?.items?.[0];
   const material = rake?.material ?? order?.material;
   const isBagged = material?.unit === 'bag';
   // Bag count only works for bagged material; until the material is known, offer both.
@@ -248,10 +254,20 @@ export default function TruckLoadingForm({ source }) {
             value={v.consignment}
             onChange={f.set('consignment')}
             error={f.errors.consignment}
+            hint={rakes && !rakes.items.length ? undefined : 'Only shipments that have arrived are shown.'}
             options={(rakes?.items ?? []).map((c) => ({ value: c._id, label: c.referenceNo, hint: `${c.material?.name} · ${c.location?.name}` }))}
           />
         ) : (
           <SelectField big required label="From warehouse" value={v.sourceLocation} onChange={f.set('sourceLocation')} error={f.errors.consignment} options={toOptions(yards?.items)} />
+        )}
+        {fromRake && rakes && !rakes.items.length && (
+          <Alert tone="warning" title="No shipment has arrived yet">
+            When the train or ship reaches the unloading point, mark it as arrived on the{' '}
+            <AriaLink href="/loading" className="font-semibold underline outline-focus-ring focus-visible:outline-2">
+              Shipments
+            </AriaLink>{' '}
+            screen. Then it shows here.
+          </Alert>
         )}
         <SelectField big required label="Going to" value={v.destination} onChange={(val) => (f.set('destination')(val), f.set('order')(''))} error={f.errors.destination} options={destinationOptions} />
         {toCustomer && (
@@ -265,6 +281,14 @@ export default function TruckLoadingForm({ source }) {
             options={siteOrders.map((o) => ({ value: o._id, label: `${o.orderNo} · ${o.customer?.name}`, hint: `${o.material?.name} · ${formatNumber(o.qty - o.dispatchedQty, 2)} ${o.material?.unit} left` }))}
             placeholder={siteOrders.length ? 'Choose order' : 'No open order for this site'}
           />
+        )}
+        {fifoNext && (
+          <Alert tone={fifoNext.shelf?.status === 'expired' ? 'warning' : 'brand'} icon={Archive} title={`Load from ${fifoNext.stockId ? `stock ${fifoNext.stockId}` : fifoNext.shipment ? `${fifoNext.shipment.referenceType} ${fifoNext.shipment.referenceNo}` : 'the older stock'}`}>
+            Oldest stock first{fifoNext.stockId && fifoNext.shipment ? ` (shipment ${fifoNext.shipment.referenceNo})` : ''}. {formatQty(fifoNext.qty, fifoNext.unit)} left from it
+            {fifoNext.manufacturedAt ? `, made ${formatDate(fifoNext.manufacturedAt)}` : fifoNext.arrivedAt ? `, arrived ${formatDate(fifoNext.arrivedAt)}` : ''}
+            {fifoNext.shelf?.status === 'expired' ? ' — past shelf life, check the bags before loading.' : '.'}
+            {fifo.items[1] && ` Then ${fifo.items[1].stockId ?? fifo.items[1].shipment?.referenceNo ?? 'older stock'}.`}
+          </Alert>
         )}
       </FormStep>
 

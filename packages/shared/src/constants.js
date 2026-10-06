@@ -175,6 +175,14 @@ export const STOCK_GRADE_LABELS = Object.freeze({
   rejected: 'Rejected',
 });
 
+/** Shelf life of a lot of stock (see shelfLife in calc.js). */
+export const SHELF_STATUS_LABELS = Object.freeze({
+  fresh: 'Fresh',
+  soon: 'Use first',
+  expired: 'Past shelf life',
+  none: 'No shelf life',
+});
+
 export const TRIP_FLAGS = Object.freeze({
   TRANSIT_LOSS: 'transit_loss',
   WEIGHT_GAIN: 'weight_gain',
@@ -250,6 +258,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   chargeBurstLossToTransporter: false,
   demurrageWarnHours: 2, // warn when projected overrun is within this many hours of free time end
   stockMismatchPct: 1,
+  shelfLifeDays: 90, // bagged cement: days from shipment arrival
+  shelfLifeWarnDays: 15, // "use first" when this few days are left
   alertEmails: [],
 });
 

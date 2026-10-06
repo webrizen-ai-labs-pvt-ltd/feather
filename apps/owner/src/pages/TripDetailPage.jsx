@@ -82,6 +82,8 @@ function Weighing({ title, side, place, extra = [] }) {
 export default function TripDetailPage() {
   const { id } = useParams();
   const { data, isLoading } = useGet(`/trips/${id}`);
+  // Shipment lots this trip took stock from (warehouse dispatches: first in, first out).
+  const { data: stockLots } = useGet(`/stock/trip/${id}`);
   const [dialog, setDialog] = useState(null);
   const done = { success: 'Saved', invalidate: ['/trips', '/admin', '/consignments'], onSuccess: () => setDialog(null) };
   const approve = useAction((api) => api.post(`/trips/${id}/freight/approve`, {}), done);
@@ -293,6 +295,20 @@ export default function TripDetailPage() {
                   ['From', t.sourceLocation?.name],
                   ['To', t.destination?.name],
                   t.consignment && ['Shipment', t.consignment.referenceNo],
+                  !t.consignment && stockLots?.items.some((l) => l.qty < 0) && [
+                    'Stock taken from',
+                    <ul key="lots" className="flex flex-col gap-0.5">
+                      {stockLots.items
+                        .filter((l) => l.qty < 0)
+                        .map((l) => (
+                          <li key={l.lot ?? 'none'}>
+                            {l.stockId ? `${l.stockId} · ` : ''}
+                            {l.shipment ? `${l.shipment.referenceType} ${l.shipment.referenceNo}` : 'Older stock'}
+                            <span className="text-tertiary"> · {formatQty(-l.qty, t.unit)}</span>
+                          </li>
+                        ))}
+                    </ul>,
+                  ],
                 ]}
               />
             </div>

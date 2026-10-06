@@ -69,8 +69,10 @@ export default function SettingsPage() {
           {num('defaultExpectedTransitHours', 'Normal road time (default)', { suffix: 'hours' })}
           {num('slowTransitFactor', 'Late truck alert after', { suffix: '× normal', hint: '1.5 = alert when 50% slower than normal.' })}
         </Group>
-        <Group icon={Package} title="Cement bags" description="How damaged bags are valued and who pays for them.">
+        <Group icon={Package} title="Cement bags" description="How damaged bags are valued and who pays for them, and how long cement keeps.">
           {num('burstDiscountPct', 'Discount on re-bagged torn cement', { suffix: '%' })}
+          {num('shelfLifeDays', 'Cement shelf life', { suffix: 'days', hint: 'Counted from the date of manufacturing on the shipment.' })}
+          {num('shelfLifeWarnDays', 'Mark stock “use first” when', { suffix: 'days left' })}
           <SwitchField className="sm:col-span-2" label="Charge torn-bag discount to truck company" hint="Hard/wet, missing and light bags are always charged." checked={v.chargeBurstLossToTransporter} onChange={f.set('chargeBurstLossToTransporter')} />
         </Group>
         <Group icon={Wallet02} title="Customer dues" description="When a customer is put on hold and gets no new trucks.">

@@ -154,9 +154,12 @@ export function ConsignmentForm({ onClose, existing }) {
     declaredUnit: PAPER_UNITS.TONS,
     wagonCount: '',
     freeTimeHours: '9',
+    // Usual railway late fee: ₹150 per wagon for each hour after free hours. Change it per shipment if needed.
     demurrageBasis: LATE_FEE_BASIS.HOUR,
-    demurrageRate: '',
+    demurrageRate: '150',
     purchaseAmount: '',
+    invoiceNo: '',
+    manufacturedAt: '',
     expectedAt: '',
     notes: '',
   };
@@ -166,6 +169,7 @@ export function ConsignmentForm({ onClose, existing }) {
           const val = existing[k];
           if (k === 'material' || k === 'location' || k === 'seller') return [k, val?._id ?? val ?? ''];
           if (k === 'expectedAt') return [k, val ? String(val).slice(0, 16) : ''];
+          if (k === 'manufacturedAt') return [k, val ? String(val).slice(0, 10) : ''];
           // Older shipments: late fee was per wagon per hour; purchase was a rate per unit.
           // Older shipments only have the quantity in the product's unit (bags → Bags, MT → Metric Tonne).
           if (k === 'declaredQty') return [k, existing.paperQty ?? val ?? ''];
@@ -338,7 +342,16 @@ export function ConsignmentForm({ onClose, existing }) {
             </Button>
           )}
         </div>
-        <TextField label="Expected arrival" type="datetime-local" value={v.expectedAt} onChange={f.set('expectedAt')} />
+        <TextField label="Invoice number" placeholder="As on the seller's bill" hint="Only you can see this." value={v.invoiceNo} onChange={f.set('invoiceNo')} error={f.errors.invoiceNo} />
+        <TextField
+          label="Date of manufacturing"
+          type="date"
+          hint="From the seller's bill or the bag print."
+          value={v.manufacturedAt}
+          onChange={f.set('manufacturedAt')}
+          error={f.errors.manufacturedAt}
+        />
+        <TextField label="Expected arrival" type="datetime-local" value={v.expectedAt} onChange={f.set('expectedAt')} error={f.errors.expectedAt} />
         <TextAreaField className="sm:col-span-2" label="Notes" value={v.notes ?? ''} onChange={f.set('notes')} />
         <fieldset className="flex flex-col gap-3 border-t border-secondary pt-5 sm:col-span-2">
           <div>

@@ -1,7 +1,7 @@
 import { CheckDone01, Edit03, FileCheck02, Package, Play, Trash01, Truck01 } from '@untitledui/icons';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { CONSIGNMENT_MODE_LABELS, formatDateTime, formatINR, formatNumber, formatPct, formatQty, formatVehicleNo, lateFeeTerms, PAPER_UNIT_LABELS } from '@feather/shared';
+import { CONSIGNMENT_MODE_LABELS, formatDate, formatDateTime, formatINR, formatNumber, formatPct, formatQty, formatVehicleNo, lateFeeTerms, PAPER_UNIT_LABELS } from '@feather/shared';
 import {
   Button,
   Card,
@@ -175,13 +175,15 @@ export default function ConsignmentDetailPage() {
                   ['Unloading point', c.location?.name],
                   // As written on the paper (KG / Metric Tonne / Bags); the tiles above show it in tonnes or bags.
                   c.declaredUnit && ['Quantity on paper', `${formatNumber(c.paperQty, 3)} ${PAPER_UNIT_LABELS[c.declaredUnit]}`],
-                  ['Wagons', c.wagonCount || '—'],
+                  ['Wagons', c.wagonCount ? `${c.wagonCount} · ${c.wagonsEmptied?.length ?? 0} marked empty` : '—'],
                   ['Free hours', `${c.freeTimeHours} hours`],
                   ['Late fee', lateFeeText(c)],
+                  ['Invoice no.', c.invoiceNo || '—'],
                   ['Total bill', c.purchaseAmount != null ? formatINR(c.purchaseAmount) : '—'],
                   ['Purchase rate', c.purchaseRatePerUnit ? `₹${formatNumber(c.purchaseRatePerUnit, 2)} / ${unit}` : '—'],
                   // Older shipments may still carry their own truck rate.
                   c.freightRatePerUnit && ['Truck rate', `${formatINR(c.freightRatePerUnit)} / ${unit}`],
+                  ['Manufactured on', c.manufacturedAt ? formatDate(c.manufacturedAt) : '—'],
                   ['Arrived at', formatDateTime(c.placedAt)],
                   ['Emptied at', formatDateTime(c.releasedAt)],
                   c.demurrage?.finalPenalty != null && ['Final late fee', formatINR(c.demurrage.finalPenalty)],

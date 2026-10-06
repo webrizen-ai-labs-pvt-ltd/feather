@@ -12,6 +12,11 @@ const stockMovementSchema = new Schema(
     qty: { type: Number, required: true },
     unit: { type: String, enum: Object.values(UNITS), required: true },
     reason: { type: String, enum: ['receipt', 'dispatch', 'adjustment', 'correction', 'cancel'], required: true },
+    /**
+     * Lot = the shipment this stock arrived in (first in, first out; shelf life from its arrival).
+     * null = stock with no shipment. Missing = row saved before lots were tracked (shared out oldest first when read).
+     */
+    lot: { type: Schema.Types.ObjectId, ref: 'Consignment' },
     trip: { type: Schema.Types.ObjectId, ref: 'Trip' },
     stockCount: { type: Schema.Types.ObjectId, ref: 'StockCount' },
     note: String,
@@ -20,6 +25,25 @@ const stockMovementSchema = new Schema(
   { timestamps: true },
 );
 stockMovementSchema.index({ location: 1, material: 1, grade: 1 });
+stockMovementSchema.index({ trip: 1 });
+
+/**
+ * Stock ID: one per shipment lot per warehouse (+ product), e.g. 04102026-02 = second stock to arrive at
+ * any warehouse on 4 Oct 2026. Made when the lot's first stock arrives there; never changes.
+ * lot null = older stock with no shipment.
+ */
+const stockLotSchema = new Schema(
+  {
+    stockId: { type: String, required: true, unique: true },
+    location: { type: Schema.Types.ObjectId, ref: 'Location', required: true },
+    material: { type: Schema.Types.ObjectId, ref: 'Material', required: true },
+    lot: { type: Schema.Types.ObjectId, ref: 'Consignment', default: null },
+    /** When the first stock of this lot arrived at this warehouse. */
+    firstInAt: { type: Date, required: true },
+  },
+  { timestamps: true },
+);
+stockLotSchema.index({ location: 1, material: 1, lot: 1 }, { unique: true });
 
 const stockCountSchema = new Schema(
   {
@@ -35,6 +59,8 @@ const stockCountSchema = new Schema(
     clientId: { type: String, unique: true, sparse: true },
     adjustedAt: Date,
     adjustedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    /** Quantity posted to system stock when the owner accepted the count. */
+    adjustedQty: Number,
   },
   { timestamps: true },
 );
@@ -86,6 +112,7 @@ const counterSchema = new Schema({ _id: String, seq: { type: Number, default: 0 
 
 export const StockMovement = mongoose.model('StockMovement', stockMovementSchema);
 export const StockCount = mongoose.model('StockCount', stockCountSchema);
+export const StockLot = mongoose.model('StockLot', stockLotSchema);
 export const Alert = mongoose.model('Alert', alertSchema);
 export const AuditLog = mongoose.model('AuditLog', auditSchema);
 export const Setting = mongoose.model('Setting', settingSchema);

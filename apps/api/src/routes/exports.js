@@ -1,6 +1,7 @@
 /** Excel downloads for the owner. */
 import ExcelJS from 'exceljs';
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import {
   AGING_BUCKETS,
   CONSIGNMENT_MODE_LABELS,
@@ -8,6 +9,7 @@ import {
   FREIGHT_STATUS_LABELS,
   formatVehicleNo,
   ROLES,
+  SHELF_STATUS_LABELS,
   STOCK_GRADE_LABELS,
   TIMEZONE,
   TRIP_FLAG_LABELS,
@@ -15,7 +17,7 @@ import {
 } from '@feather/shared';
 import { requireRole } from '@/middleware/auth.js';
 import { Consignment, Trip } from '@/models/index.js';
-import { bookStock } from '@/services/stock.js';
+import { stockLots } from '@/services/stock.js';
 import { creditOverview, transporterScorecard } from '@/services/reports.js';
 import { notFound } from '@/utils/http.js';
 
@@ -147,11 +149,13 @@ const EXPORTS = {
         { header: 'Unloaded', key: 'lifted', style: QTY },
         { header: 'Received', key: 'received', style: QTY },
         { header: 'Trucks', key: 'trips' },
+        { header: 'Manufactured', key: 'manufacturedAt', style: { numFmt: 'dd-mmm-yy' } },
         { header: 'Arrived at', key: 'placedAt', style: DT },
         { header: 'Emptied at', key: 'releasedAt', style: DT },
         { header: 'Free hours', key: 'free' },
         { header: 'Late hours', key: 'over' },
         { header: 'Late fee', key: 'penalty', style: MONEY },
+        { header: 'Invoice no.', key: 'invoiceNo', width: 18 },
         { header: 'Total bill', key: 'bill', style: MONEY },
         { header: 'Purchase Rate', key: 'rate', style: MONEY },
         { header: 'Status', key: 'status' },
@@ -166,11 +170,13 @@ const EXPORTS = {
         lifted: c.liftedQty,
         received: c.receivedQty,
         trips: c.tripCount,
+        manufacturedAt: ist(c.manufacturedAt),
         placedAt: ist(c.placedAt),
         releasedAt: ist(c.releasedAt),
         free: c.freeTimeHours,
         over: c.demurrage?.finalOverHours,
         penalty: c.demurrage?.finalPenalty,
+        invoiceNo: c.invoiceNo,
         bill: c.purchaseAmount,
         rate: c.purchaseRatePerUnit,
         status: CONSIGNMENT_STATUS_LABELS[c.status],
@@ -230,18 +236,55 @@ const EXPORTS = {
     };
   },
 
-  async stock() {
-    const rows = await bookStock();
+  async stock(req) {
+    const location = mongoose.isValidObjectId(req.query.location) ? req.query.location : undefined;
+    const { items } = await stockLots({ location, owner: true });
     return {
-      name: 'Book Stock',
+      name: 'Stock by Shipment',
       columns: [
+        { header: 'Stock ID', key: 'stockId', width: 14 },
         { header: 'Warehouse', key: 'location', width: 22 },
-        { header: 'Material', key: 'material', width: 20 },
-        { header: 'Grade', key: 'grade', width: 18 },
-        { header: 'Quantity', key: 'qty', style: QTY },
+        { header: 'Product', key: 'material', width: 20 },
+        { header: 'Shipment paper no.', key: 'ref', width: 20 },
+        { header: 'Invoice no.', key: 'invoiceNo', width: 18 },
+        { header: 'Date of manufacturing', key: 'made', width: 14, style: { numFmt: 'dd-mmm-yy' } },
+        { header: 'Seller', key: 'seller', width: 20 },
+        { header: 'Arrived', key: 'arrived', style: DT },
+        { header: 'Age (days)', key: 'age' },
+        { header: 'Days left', key: 'daysLeft' },
+        { header: 'Shelf life', key: 'shelf', width: 16 },
+        { header: 'Shelf life counted from', key: 'shelfFrom', width: 22 },
+        { header: 'Goes out (FIFO)', key: 'fifo' },
+        { header: STOCK_GRADE_LABELS.prime, key: 'prime', style: QTY },
+        { header: STOCK_GRADE_LABELS.seconds, key: 'seconds', style: QTY },
+        { header: STOCK_GRADE_LABELS.rejected, key: 'rejected', style: QTY },
         { header: 'Unit', key: 'unit' },
+        { header: 'Received here', key: 'received', style: QTY },
+        { header: 'Sent out', key: 'sent', style: QTY },
+        { header: 'Count / correction', key: 'adjusted', style: QTY },
       ],
-      rows: rows.map((r) => ({ location: r.location?.name, material: r.material?.name, grade: STOCK_GRADE_LABELS[r.grade], qty: r.qty, unit: r.unit })),
+      rows: items.map((r) => ({
+        stockId: r.stockId ?? '',
+        location: r.location.name,
+        material: r.material.name,
+        ref: r.shipment ? `${r.shipment.referenceType} ${r.shipment.referenceNo}` : 'Older stock (no shipment)',
+        invoiceNo: r.shipment?.invoiceNo ?? '',
+        seller: r.shipment?.seller ?? '',
+        made: ist(r.manufacturedAt),
+        arrived: ist(r.arrivedAt),
+        age: r.shelf.ageDays ?? '',
+        daysLeft: r.shelf.daysLeft ?? '',
+        shelf: SHELF_STATUS_LABELS[r.shelf.status],
+        shelfFrom: r.shelf.status === 'none' ? '' : r.shelfFrom === 'manufactured' ? 'Date of manufacturing' : 'Arrival (no manufacturing date)',
+        fifo: r.fifoRank ?? '',
+        prime: r.qty.prime,
+        seconds: r.qty.seconds,
+        rejected: r.qty.rejected,
+        unit: r.unit,
+        received: r.receivedQty,
+        sent: r.sentQty,
+        adjusted: r.adjustedQty,
+      })),
     };
   },
 };

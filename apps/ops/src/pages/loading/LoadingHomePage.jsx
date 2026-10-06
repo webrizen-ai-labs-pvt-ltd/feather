@@ -2,6 +2,7 @@ import { Package, Play, Train, Truck01, Upload01 } from '@untitledui/icons';
 import { useState } from 'react';
 import { formatQty, formatTime, formatVehicleNo } from '@feather/shared';
 import { Button, ConfirmDialog, DataTable, DemurrageClock, EmptyState, Loading, PageHeader, Section, TripStatusBadge, useAction, useAuth, useGet } from '@feather/ui';
+import { emptiedWagons, WagonBoard } from '@/components/WagonBoard.jsx';
 
 export default function LoadingHomePage() {
   const { user } = useAuth();
@@ -42,13 +43,24 @@ export default function LoadingHomePage() {
             {data.items.map((c) => (
               <div key={c._id} className="flex flex-col gap-3">
                 <DemurrageClock consignment={c} />
+                {c.wagonCount > 0 && <WagonBoard consignment={c} />}
                 {c.status === 'expected' && (
                   <Button size="lg" color="secondary" iconLeading={Play} onPress={() => setConfirm({ id: c._id, action: 'place', ref: c.referenceNo })}>
                     Train has arrived — start timer
                   </Button>
                 )}
                 {c.status === 'placed' && (
-                  <Button size="lg" color="secondary" iconLeading={Package} onPress={() => setConfirm({ id: c._id, action: 'release', ref: c.referenceNo })}>
+                  <Button
+                    size="lg"
+                    color="secondary"
+                    iconLeading={Package}
+                    onPress={() => {
+                      // Warn if some wagons are not marked empty yet.
+                      const emptied = emptiedWagons(c);
+                      const left = Array.from({ length: c.wagonCount ?? 0 }, (_, i) => i + 1).filter((n) => !emptied.has(n));
+                      setConfirm({ id: c._id, action: 'release', ref: c.referenceNo, wagonsLeft: left });
+                    }}
+                  >
                     All unloaded — finish
                   </Button>
                 )}
@@ -83,7 +95,9 @@ export default function LoadingHomePage() {
         message={
           confirm?.action === 'place'
             ? `Do this only when shipment ${confirm?.ref} has arrived at the unloading point. The time now is saved.`
-            : `Do this only when shipment ${confirm?.ref} is fully empty. No more trucks can load from it.`
+            : confirm?.wagonsLeft?.length
+              ? `${confirm.wagonsLeft.length} wagon${confirm.wagonsLeft.length === 1 ? ' is' : 's are'} not marked empty yet (${confirm.wagonsLeft.join(', ')}). Finish only if every wagon of ${confirm?.ref} is really empty — no more trucks can load from it.`
+              : `Do this only when shipment ${confirm?.ref} is fully empty. No more trucks can load from it.`
         }
         confirmLabel="Yes, confirm"
         onConfirm={() => act.mutate(confirm)}

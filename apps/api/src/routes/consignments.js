@@ -11,6 +11,7 @@ import {
   round,
   shipmentDemurrage,
   TRIP_STATUS,
+  wagonMarkSchema,
 } from '@feather/shared';
 import { requireRole } from '@/middleware/auth.js';
 import { documentUpload } from '@/middleware/upload.js';
@@ -138,8 +139,11 @@ router.post('/', requireRole(OWNER, DISPATCH_OPERATOR), validate(consignmentSche
   if (!location || ![LOCATION_TYPES.SIDING, LOCATION_TYPES.PORT].includes(location.type)) {
     throw badRequest('Choose a railway station or port.');
   }
-  // Purchase amount is owner only.
-  if (req.user.role !== OWNER) delete data.purchaseAmount;
+  // Purchase amount and the seller's invoice number are owner only.
+  if (req.user.role !== OWNER) {
+    delete data.purchaseAmount;
+    delete data.invoiceNo;
+  }
   Object.assign(data, paperQuantity(data, material));
   Object.assign(data, purchaseFields(data));
   Object.assign(data, await resolveSeller({ data, material, user: req.user }));
@@ -190,6 +194,30 @@ router.post('/:id/place', requireRole(OWNER, DISPATCH_OPERATOR, SIDING_SUPERVISO
   await c.save();
   await audit(req, { action: 'consignment.place', entity: 'Consignment', entityId: c._id, after: { placedAt: c.placedAt } });
   res.json({ item: presentConsignment(c, req.user.role) });
+});
+
+/**
+ * Train: mark one wagon fully empty, or undo a wrong tap. Only while the shipment is unloading.
+ * Repeating the same mark changes nothing, so an offline retry is safe.
+ */
+router.post('/:id/wagons', requireRole(OWNER, DISPATCH_OPERATOR, SIDING_SUPERVISOR), validate(wagonMarkSchema), async (req, res) => {
+  const c = await loadForAction(req);
+  const { no, emptied, deviceTime, wasOffline } = req.valid;
+  if (!(c.wagonCount > 0)) throw badRequest('This shipment has no wagons.');
+  if (no > c.wagonCount) throw badRequest(`This train has ${c.wagonCount} wagons.`, { fields: { no: `1 to ${c.wagonCount}` } });
+  if (c.status !== CONSIGNMENT_STATUS.PLACED) throw badRequest('Wagons can be marked only while the shipment is unloading.');
+  const result = emptied
+    ? await Consignment.updateOne(
+        { _id: c._id, 'wagonsEmptied.no': { $ne: no } },
+        { $push: { wagonsEmptied: { no, at: new Date(), deviceTime, wasOffline, by: req.user._id } } },
+      )
+    : await Consignment.updateOne({ _id: c._id }, { $pull: { wagonsEmptied: { no } } });
+  // History only when something changed (a repeated tap or offline retry changes nothing).
+  if (result.modifiedCount) {
+    await audit(req, { action: emptied ? 'consignment.wagon_emptied' : 'consignment.wagon_unmarked', entity: 'Consignment', entityId: c._id, after: { wagon: no } });
+  }
+  const fresh = await Consignment.findById(c._id).lean();
+  res.json({ item: presentConsignment(fresh, req.user.role) });
 });
 
 /** Rake empty and handed back to Railways / ship sailed. Final demurrage is fixed. */

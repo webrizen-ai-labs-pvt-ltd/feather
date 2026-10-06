@@ -133,9 +133,20 @@ export const HELP_SECTIONS = [
             ['Still to unload', 'Material still on the shipment.'],
             ['Unloading speed / hr', 'How much you are unloading per hour right now.'],
             ['Speed needed / hr', 'How much you must unload per hour to finish in time. Red means you are too slow.'],
+            [
+              'Late charges',
+              'What the late fee has reached so far. It starts when free hours end — for example ₹150 for every wagon, for each started hour — on ALL wagons of the train, even if only one wagon still has material. It stops when the shipment is finished.',
+            ],
           ]}
         />
         <P>Below the shipments you see <b>Trucks loaded today</b>: your trucks and whether each has reached its destination.</P>
+        <H>Mark each wagon when it is empty (trains)</H>
+        <P>
+          A train shipment shows its wagons as numbered boxes, with <b>Wagons emptied: 5 of 9</b> on top. When a wagon is <b>fully empty</b>, tap its number — it
+          turns green with a tick. Even one bag left in a wagon is charged, so tap only when it is really empty. Tapped a wagon by mistake? Tap it again and confirm{' '}
+          <b>Mark not empty</b>.
+        </P>
+        <Note>No network? The tap is saved on the phone (the box shows a small cloud) and sent by itself later.</Note>
         <H>Start the timer when the train arrives</H>
         <P>
           A new shipment says "Not arrived yet". When it reaches your unloading point, tap <b>Train has arrived — start timer</b> and confirm. Feather saves the time
@@ -159,7 +170,7 @@ export const HELP_SECTIONS = [
       <>
         <Steps>
           <>Tap <b>Load a truck</b> (or <b>Load truck</b> in the bottom bar).</>
-          <><b>Shipment</b>: choose the shipment the material is coming from.</>
+          <><b>Shipment</b>: choose the shipment the material is coming from. Only shipments that have <b>arrived</b> are listed — if yours is missing, mark it as arrived on the <b>Shipments</b> screen first.</>
           <><b>Going to</b>: choose one of your warehouses or a delivery site.</>
           <>For a delivery site, choose the <b>Customer order</b> for that site.</>
           <><b>Truck number</b>: for example MH12AB1234. Spaces do not matter. If this truck came before, driver and truck company fill in by themselves.</>
@@ -458,12 +469,18 @@ export const HELP_SECTIONS = [
             <b>Free hours</b> starts at 9 — change it if your paper says otherwise. For the <b>Late fee</b>, choose <b>Per hour</b>, <b>Per day</b> or{' '}
             <b>One time</b>, then type the amount. For a train it is charged per wagon.
           </>
-          <>Optional: <b>Total billing amount</b> from the seller's bill (only you see it — Feather works out the rate per unit), <b>Expected arrival</b>, <b>Notes</b>.</>
+          <>
+            Optional: <b>Total billing amount</b> and <b>Invoice number</b> from the seller&apos;s bill (only you see them — Feather works out the rate per unit),{' '}
+            <b>Date of manufacturing</b> (from the seller&apos;s bill or the bag print), <b>Expected arrival</b>, <b>Notes</b>.
+          </>
           <>
             Optional: under <b>Attach bill / documents</b>, tap <b>Attach files</b> and choose the seller&apos;s bill, the RR / Bill of Lading or other papers
             (PDF or picture, up to 10 MB each). Pick what each file is.
           </>
-          <>Tap <b>Save</b>. The shipment appears on the loading staff's phone as "On the way". Attached files are uploaded right after.</>
+          <>
+            Tap <b>Save</b>. The shipment appears on the loading staff&apos;s phone as &quot;On the way&quot;. Trucks can be loaded from it once it is marked{' '}
+            <b>arrived</b>. Attached files are uploaded right after.
+          </>
         </Steps>
         <Note>
           Documents can also be added later: open the shipment and use <b>Documents → Add</b>. Click a file to open it. <b>Remove</b> takes it off the shipment
@@ -659,21 +676,27 @@ export const HELP_SECTIONS = [
   {
     id: 'owner-stock',
     group: 'owner',
-    title: 'Inventory: system vs counted',
+    title: 'Inventory: stock by shipment',
     roles: [OWNER],
-    keywords: 'stock book stock count accept adjust prime seconds rejected',
+    keywords: 'stock book stock count accept adjust good discount rejected shipment fifo first in first out shelf life expiry age warehouse',
     body: (
       <>
         <P>
-          Feather keeps <b>system stock</b> for each warehouse by itself: it adds every truck received and takes away every truck dispatched. Cement has three
-          grades: <b>Prime</b> (good), <b>Seconds</b> (re-bagged, sold at discount) and <b>Rejected</b>.
+          Feather keeps <b>system stock</b> for each warehouse by itself: it adds every truck received and takes away every truck dispatched. Stock is kept
+          <b> per shipment</b> — by its shipment paper number (RR or Bill of Lading) — so you can see how many bags are left from each one.
         </P>
         <Bullets>
-          <><b>System now</b>: what should be there.</>
-          <><b>Last count</b>: what the receiving staff counted.</>
-          <><b>Difference at count</b>: red if more than 1% off. A big shortfall means material went missing from the warehouse.</>
+          <><b>Warehouse filter</b> (top right): see one warehouse or all of them. Tap a warehouse in <b>Stock age</b> to open it.</>
+          <><b>First in, first out</b>: a truck sent from a warehouse always takes stock from the oldest manufactured shipment first. <b>Next out</b> marks that shipment; the dispatch form tells the yard which stack to load.</>
+          <><b>Shelf life</b>: cement keeps 90 days from the <b>Date of manufacturing</b> entered on the shipment (change the days in Settings). Day of manufacturing = day 0. <b>Use first</b> = 15 days or less left. <b>Past shelf life</b> = check the bags before selling. If a shipment has no manufacturing date, it is counted from the day it arrived and shows <b>Not entered</b> — add the date to fix it.</>
+          <><b>Stock ID</b>: every shipment&apos;s stock gets an ID the day it first arrives at a warehouse, like <b>04102026-02</b> (the second stock to arrive on 4 Oct 2026). If one shipment goes to two warehouses, each gets its own ID. Write it on the stack so the yard loads the right one.</>
+          <><b>Older stock</b>: stock received before tracking by shipment. It goes out first.</>
         </Bullets>
-        <P>If you trust a count, tap <b>Accept count</b> and write a reason. System stock is set to the counted amount and saved in the history.</P>
+        <P>Cement has three grades: <b>Good</b>, <b>Discount</b> (re-bagged torn bags) and <b>Rejected</b>. Tap any shipment to see every truck in and out.</P>
+        <P>
+          <b>System vs counted</b> compares system stock with what receiving staff counted. If you trust a count, tap <b>Accept count</b> and write a reason. The
+          difference found on the day of counting is posted, so trucks that came or left after the count are not lost. A shortage comes out of the oldest shipment.
+        </P>
       </>
     ),
   },
